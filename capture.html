@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Traffic Buddy - Report</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h2 { color: #4a4a4a; }
+        button { background: #25D366; color: white; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; margin: 10px 0; }
+        button:disabled { background: #cccccc; }
+        textarea { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        #preview { width: 100%; margin: 10px 0; border-radius: 4px; }
+        .status { margin: 10px 0; padding: 10px; border-radius: 4px; }
+        .error { background-color: #ffebee; color: #c62828; }
+        .success { background-color: #e8f5e9; color: #2e7d32; }
+        .loader { 
+            border: 4px solid #f3f3f3; 
+            border-top: 4px solid #25D366; 
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 10px auto;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #f3f3f3;
+            border-radius: 4px;
+            margin: 10px 0;
+            height: 20px;
+            display: none;
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #25D366;
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+        .progress-text {
+            text-align: center;
+            font-size: 12px;
+            margin-top: 5px;
+            color: #4a4a4a;
+        }
+        /* Added for improved UI */
+        .success-animation {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .checkmark {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: block;
+            stroke-width: 2;
+            stroke: #fff;
+            stroke-miterlimit: 10;
+            box-shadow: inset 0px 0px 0px #25D366;
+            animation: fill .4s ease-in-out .4s forwards, scale .3s ease-in-out .9s both;
+            margin: 0 auto;
+        }
+        .checkmark__circle {
+            stroke-dasharray: 166;
+            stroke-dashoffset: 166;
+            stroke-width: 2;
+            stroke-miterlimit: 10;
+            stroke: #25D366;
+            fill: none;
+            animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+        }
+        .checkmark__check {
+            transform-origin: 50% 50%;
+            stroke-dasharray: 48;
+            stroke-dashoffset: 48;
+            animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+        }
+        @keyframes stroke {
+            100% { stroke-dashoffset: 0; }
+        }
+        @keyframes scale {
+            0%, 100% { transform: none; }
+            50% { transform: scale3d(1.1, 1.1, 1); }
+        }
+        @keyframes fill {
+            100% { box-shadow: inset 0px 0px 0px 30px #25D366; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Traffic Buddy Report</h2>
+        <p id="reportType">Loading...</p>
+        
+        <div id="step1">
+            <p>Step 1: Capture an image</p>
+            <button id="captureBtn">Capture Image</button>
+            <input type="file" id="fileInput" accept="image/*" capture="camera" style="display: none;">
+            <img id="preview" style="display: none;">
+        </div>
+        
+        <div id="step2" style="display: none;">
+            <p>Step 2: Provide details</p>
+            <textarea id="description" placeholder="Enter description" rows="4"></textarea>
+            <p id="location">Getting your location...</p>
+            <div id="addressContainer" style="display: none;">
+                <p><strong>Address:</strong> <span id="addressText"></span></p>
+            </div>
+            <div class="progress-bar-container" id="progressContainer">
+                <div class="progress-bar" id="progressBar"></div>
+                <div class="progress-text" id="progressText">Preparing...</div>
+            </div>
+            <button id="submitBtn" disabled>Submit Report</button>
+            <div id="loader" class="loader"></div>
+        </div>
+        
+        <div id="successAnimation" class="success-animation" style="display: none;">
+            <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
+                <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+            </svg>
+        </div>
+        
+        <div id="status" class="status" style="display: none;"></div>
+    </div>
+
+    <script>
+        // Parse URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('userId');
+        const reportType = urlParams.get('reportType');
+        const linkId = urlParams.get('linkId'); // Add this parameter to your links
+        const reportTypeText = {
+        '1': 'Traffic Violation',
+        '2': 'Traffic Congestion',
+        '3': 'Irregularity',
+        '4': 'Road Damage',
+        '5': 'Illegal Parking',
+        '6': 'Traffic Signal Issue',
+        '7': 'Suggestion'
+        }[reportType] || 'Report';
+        
+        document.getElementById('reportType').textContent = `Report Type: ${reportTypeText}`;
+        
+        // Variables to store data
+        let latitude, longitude, address;
+        let imageFile;
+        let redirectTimeout;
+    
+        // Get address from coordinates
+        async function getAddressFromCoordinates(lat, lng) {
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+                const data = await response.json();
+                return data.display_name || `${lat}, ${lng}`;
+            } catch (error) {
+                console.error('Error getting address:', error);
+                return `${lat}, ${lng}`;
+            }
+        }
+    
+        // Initialize geolocation
+        function getLocation() {
+            document.getElementById('step1').innerHTML = `
+                <p>Please wait while we get your location...</p>
+                <div class="loader" style="display: block;"></div>
+            `;
+    
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(async (position) => {
+                    latitude = position.coords.latitude;
+                    longitude = position.coords.longitude;
+                    
+                    // Get address
+                    address = await getAddressFromCoordinates(latitude, longitude);
+                    
+                    // Show capture interface
+                    document.getElementById('step1').innerHTML = `
+                        <p>Your location: ${address}</p>
+                        <input type="file" id="fileInput" accept="image/*" capture="camera" style="display: none;">
+                        <button id="captureBtn">📸 Take Photo</button>
+                        <img id="preview" style="display: none;">
+                        <button id="retakeBtn" style="display: none;">Retake Photo</button>
+                    `;
+                    
+                    // Add event listeners
+                    document.getElementById('captureBtn').addEventListener('click', () => {
+                        document.getElementById('fileInput').click();
+                    });
+                    
+                    document.getElementById('fileInput').addEventListener('change', (event) => {
+                        if (event.target.files && event.target.files[0]) {
+                            imageFile = event.target.files[0];
+                            const reader = new FileReader();
+                            
+                            reader.onload = function(e) {
+                                const preview = document.getElementById('preview');
+                                preview.src = e.target.result;
+                                preview.style.display = 'block';
+                                
+                                document.getElementById('captureBtn').style.display = 'none';
+                                document.getElementById('retakeBtn').style.display = 'block';
+                                
+                                // Show step 2
+                                document.getElementById('step2').innerHTML = `
+                                    <textarea id="description" placeholder="Describe the situation (optional)"></textarea>
+                                    <div class="progress-bar-container" id="progressContainer">
+                                        <div class="progress-bar" id="progressBar"></div>
+                                        <div class="progress-text" id="progressText">Preparing...</div>
+                                    </div>
+                                    <button id="submitBtn" disabled>Submit Report</button>
+                                `;
+                                document.getElementById('step2').style.display = 'block';
+                                
+                                // Add event listeners
+                                document.getElementById('submitBtn').disabled = false;
+                                document.getElementById('retakeBtn').addEventListener('click', () => {
+                                    document.getElementById('preview').style.display = 'none';
+                                    document.getElementById('captureBtn').style.display = 'block';
+                                    document.getElementById('retakeBtn').style.display = 'none';
+                                    document.getElementById('step2').style.display = 'none';
+                                    imageFile = null;
+                                });
+                            };
+                            
+                            reader.readAsDataURL(event.target.files[0]);
+                        }
+                    });
+                }, (error) => {
+                    console.error('Error getting location:', error);
+                    document.getElementById('step1').innerHTML = `
+                        <p>We couldn't get your location. Please enable location services and try again.</p>
+                        <button onclick="getLocation()">Retry</button>
+                    `;
+                });
+            } else {
+                document.getElementById('step1').innerHTML = `
+                    <p>Geolocation is not supported by this browser.</p>
+                `;
+            }
+        }
+    
+        // Check if link is still valid on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Verify link validity
+                const response = await fetch(`/api/check-link-validity?linkId=${linkId}&userId=${userId}`);
+                const data = await response.json();
+                
+                if (!data.valid) {
+                    // Link is invalid or already used
+                    document.getElementById('step1').style.display = 'none';
+                    document.getElementById('step2').style.display = 'none';
+                    document.getElementById('status').className = 'status error';
+                    document.getElementById('status').innerHTML = `
+                        <p>${data.message || 'This link has already been used or is invalid.'}</p>
+                        <p>Please return to WhatsApp to report another issue.</p>
+                    `;
+                    document.getElementById('status').style.display = 'block';
+                    
+                    // Auto redirect after 5 seconds
+                    setTimeout(() => {
+                        window.location.href = 'https://wa.me/918788649885';
+                    }, 5000);
+                    
+                    return;
+                }
+                
+                // Get location when the page loads
+                getLocation();
+                
+            } catch (error) {
+                console.error('Error checking link validity:', error);
+                // Still attempt to get location and proceed if the validity check fails
+                getLocation();
+            }
+        });
+    
+        function checkSubmitButton() {
+            if (imageFile) {
+                document.getElementById('submitBtn').disabled = false;
+            } else {
+                document.getElementById('submitBtn').disabled = true;
+            }
+        }
+    
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (redirectTimeout) {
+                clearTimeout(redirectTimeout);
+            }
+        });
+    
+        // Submit form with super-fast response
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.id === 'submitBtn') {
+                // Disable submit button immediately
+                e.target.disabled = true;
+                
+                // Show progress UI with faster animation
+                document.getElementById('progressContainer').style.display = 'block';
+                document.getElementById('progressBar').style.width = '0%';
+                document.getElementById('progressText').textContent = 'Preparing report...';
+                
+                // Move progress immediately to 30% to show quick response
+                setTimeout(() => {
+                    document.getElementById('progressBar').style.width = '30%';
+                    document.getElementById('progressText').textContent = 'Uploading...';
+                }, 50);
+                
+                // Prepare the form data
+                const description = document.getElementById('description').value;
+                const formData = new FormData();
+                formData.append('image', imageFile);
+                formData.append('latitude', latitude);
+                formData.append('longitude', longitude);
+                formData.append('address', address);
+                formData.append('description', description);
+                formData.append('userId', userId);
+                formData.append('reportType', reportType);
+                formData.append('linkId', linkId); // Add linkId to form submission
+                
+                try {
+                    // Simulate quick progress
+                    setTimeout(() => {
+                        document.getElementById('progressBar').style.width = '60%';
+                        document.getElementById('progressText').textContent = 'Almost there...';
+                    }, 100);
+                    
+                    // Submit the form in the background
+                    fetch('/api/report', {
+                        method: 'POST',
+                        body: formData
+                    }).then(() => {
+                        console.log("Background report submission completed");
+                    }).catch(err => {
+                        console.error("Background error:", err);
+                    });
+                    
+                    // After a short delay, show success
+                    setTimeout(() => {
+                        // Show 100% completion
+                        document.getElementById('progressBar').style.width = '100%';
+                        document.getElementById('progressText').textContent = 'Complete!';
+                        
+                        // Hide the form
+                        document.getElementById('step1').style.display = 'none';
+                        document.getElementById('step2').style.display = 'none';
+                        
+                        // Show the success animation
+                        document.getElementById('successAnimation').innerHTML = `
+                            <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                                <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
+                                <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+                            </svg>
+                        `;
+                        document.getElementById('successAnimation').style.display = 'block';
+                        
+                        // Show success message
+                        document.getElementById('status').className = 'status success';
+                        document.getElementById('status').innerHTML = `
+                            <p>Your ${reportTypeText} report has been submitted successfully!</p>
+                            <p>Returning to WhatsApp...</p>
+                        `;
+                        document.getElementById('status').style.display = 'block';
+                        
+                        // Redirect to WhatsApp quickly
+                        redirectTimeout = setTimeout(() => {
+                            window.location.href = 'https://wa.me/918788649885';
+                        }, 3000);
+                    }, 300);
+                    
+                } catch (error) {
+                    // This should rarely happen
+                    document.getElementById('progressContainer').style.display = 'none';
+                    document.getElementById('status').className = 'status error';
+                    document.getElementById('status').innerHTML = `
+                        <p>There was an error submitting your report. Please try again.</p>
+                        <p>Error: ${error.message}</p>
+                    `;
+                    document.getElementById('status').style.display = 'block';
+                    e.target.disabled = false;
+                }
+            }
+        });
+    </script>
+</body>
+</html>

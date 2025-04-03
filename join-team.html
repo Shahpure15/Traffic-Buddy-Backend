@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Traffic Buddy - Join Team</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --primary-color: #25D366;
+            --primary-dark: #128C7E;
+            --error-color: #c62828;
+            --success-color: #2e7d32;
+            --text-color: #333;
+            --border-color: #ddd;
+            --background-color: #f5f5f5;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .mission-section {
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+            box-shadow: 0 4px 8px rgba(37, 211, 102, 0.2);
+        }
+
+        .mission-section h3 {
+            margin: 0 0 12px 0;
+            font-size: 1.3em;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .mission-section p {
+            margin: 0 0 15px 0;
+            font-size: 1em;
+            line-height: 1.6;
+            opacity: 0.95;
+        }
+
+        h2 {
+            color: var(--primary-color);
+            text-align: center;
+            margin-bottom: 35px;
+            font-size: 1.8em;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--text-color);
+            font-size: 1.1em;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+            background-color: white;
+        }
+
+        input[type="text"]:focus,
+        input[type="email"]:focus,
+        input[type="tel"]:focus,
+        textarea:focus,
+        select:focus {
+            border-color: var(--primary-color);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.1);
+        }
+
+        .file-upload {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            border: 2px dashed var(--border-color);
+            border-radius: 10px;
+            background-color: #fafafa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .file-upload:hover {
+            border-color: var(--primary-color);
+            background-color: rgba(37, 211, 102, 0.05);
+        }
+
+        .file-upload.uploaded {
+            border-style: solid;
+            border-color: var(--primary-color);
+            background-color: rgba(37, 211, 102, 0.1);
+        }
+
+        .file-upload input[type="file"] {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .file-upload-icon {
+            font-size: 40px;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        .file-upload-text {
+            color: var(--text-color);
+            text-align: center;
+            font-size: 0.9em;
+        }
+
+        button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 16px 24px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(37, 211, 102, 0.2);
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 8px rgba(37, 211, 102, 0.25);
+        }
+
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.8;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: 500;
+            display: none;
+        }
+
+        .error {
+            background-color: #ffebee;
+            color: var(--error-color);
+            border: 1px solid #ffcdd2;
+        }
+
+        .success {
+            background-color: #e8f5e9;
+            color: var(--success-color);
+            border: 1px solid #c8e6c9;
+        }
+
+        .loader-container {
+            display: none;
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Phone input with OTP button */
+        .phone-container {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+
+        .phone-input-container {
+            flex: 1;
+        }
+
+        .otp-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0 20px;
+            height: 44px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            font-size: 15px;
+            min-width: 110px;
+            box-shadow: 0 2px 4px rgba(37, 211, 102, 0.2);
+            width: auto;
+        }
+
+        .otp-button:hover:not(:disabled) {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(37, 211, 102, 0.3);
+        }
+
+        /* Otp input with verify button */
+        .otp-container {
+            display: flex;
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .otp-input-container {
+            flex: 1;
+        }
+
+        .otp-input {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            font-size: 18px;
+            background-color: white;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box;
+        }
+
+        .otp-input:focus {
+            border-color: var(--primary-color);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.2);
+        }
+
+        .otp-input::placeholder {
+            color: #999;
+        }
+
+        .verify-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0 20px;
+            height: 44px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            font-size: 15px;
+            min-width: 110px;
+            box-shadow: 0 2px 4px rgba(37, 211, 102, 0.2);
+            width: auto;
+        }
+
+        .verify-button:hover:not(:disabled) {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(37, 211, 102, 0.3);
+        }
+
+        .otp-message {
+            font-size: 0.9em;
+            margin-top: 8px;
+            color: var(--text-color);
+        }
+
+        .success-animation {
+            text-align: center;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .checkmark {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: block;
+            stroke-width: 2;
+            stroke: #fff;
+            stroke-miterlimit: 10;
+            box-shadow: inset 0px 0px 0px #25D366;
+            animation: fill .4s ease-in-out .4s forwards, scale .3s ease-in-out .9s both;
+            margin: 0 auto;
+        }
+        
+        .checkmark__circle {
+            stroke-dasharray: 166;
+            stroke-dashoffset: 166;
+            stroke-width: 2;
+            stroke-miterlimit: 10;
+            stroke: #25D366;
+            fill: none;
+            animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+        }
+        
+        .checkmark__check {
+            transform-origin: 50% 50%;
+            stroke-dasharray: 48;
+            stroke-dashoffset: 48;
+            animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+        }
+        
+        @keyframes stroke {
+            100% { stroke-dashoffset: 0; }
+        }
+        
+        @keyframes scale {
+            0%, 100% { transform: none; }
+            50% { transform: scale3d(1.1, 1.1, 1); }
+        }
+        
+        @keyframes fill {
+            100% { box-shadow: inset 0px 0px 0px 30px #25D366; }
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 15px;
+            }
+
+            .container {
+                padding: 20px;
+            }
+
+            button {
+                padding: 14px 20px;
+            }
+
+            .phone-container {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .otp-container {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .otp-button, .verify-button {
+                width: 100%;
+                height: 48px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="mission-section">
+            <h3>Our Mission</h3>
+            <p>To create safer and more efficient roads through community engagement and technology-driven solutions.
+            </p>
+            <h3>Our Vision</h3>
+            <p>Building a collaborative network of responsible citizens working together to improve traffic management
+                and road safety across our communities.</p>
+        </div>
+
+        <h2>Join Traffic Buddy Team</h2>
+
+        <form id="joinForm">
+            <div class="form-group">
+                <label for="fullName">Full Name *</label>
+                <input type="text" id="fullName" name="fullName" required placeholder="Enter your full name">
+            </div>
+
+            <div class="form-group">
+                <label for="division">In which area you want to join as Volunteer ?*</label>
+                <select id="division" name="division" required>
+                    <option value="">Select your Area</option>
+                    <option value="CHAKAN">Chakan</option>
+                    <option value="NIGDI">Nigdi</option>
+                    <option value="DIGHI ALANDI">Dighi-Alandi</option>
+                    <option value="MAHALUNGE">Mahalunge</option>
+                    <option value="CHINCHWAD">Chinchwad</option>
+                    <option value="PIMPRI">Pimpri</option>
+                    <option value="BAVDHAN">Bavdhan</option>
+                    <option value="WAKAD">Wakad</option>
+                    <option value="TALWADE">Talwade</option>
+                    <option value="TALEGAON">Talegaon</option>
+                    <option value="SANGHVI">Sanghvi</option>
+                    <option value="BHOSARI">Bhosari</option>
+                    <option value="DEHUROAD">Dehuroad</option>
+                    <option value="HINJEWADI">Hinjewadi</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="motivation">Why do you want to join Traffic Buddy? *</label>
+                <textarea id="motivation" name="motivation" rows="4" required
+                    placeholder="Share your motivation to join our team..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="address">Complete Address *</label>
+                <textarea id="address" name="address" rows="3" required
+                    placeholder="Enter your complete address"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="phone">Phone Number *</label>
+                
+                <div class="phone-container">
+                    <div class="phone-input-container">
+                        <input type="tel" id="phone" name="phone" required placeholder="Enter your 10-digit phone number"
+                            pattern="[0-9]{10}" maxlength="10">
+                    </div>
+                    <button type="button" class="otp-button" id="sendOtpBtn">
+                        Send OTP
+                    </button>
+                </div>
+                
+                <div class="otp-container">
+                    <div class="otp-input-container">
+                        <input type="text" id="otp" class="otp-input" placeholder="Enter 6-digit OTP" 
+                            required pattern="[0-9]{6}" maxlength="6">
+                    </div>
+                    <button type="button" class="verify-button" id="verifyOtpBtn" disabled>
+                        Verify OTP
+                    </button>
+                </div>
+                
+                <div class="otp-message" id="otpMessage"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address *</label>
+                <input type="email" id="email" name="email" required placeholder="Enter your email address">
+            </div>
+
+            <div class="form-group">
+                <label for="aadharNumber">Aadhar Card Number *</label>
+                <input type="text" id="aadharNumber" name="aadharNumber" required
+                    placeholder="Enter your 12-digit Aadhar number" pattern="[0-9]{12}" maxlength="12">
+            </div>
+
+            <div class="form-group">
+                <label>Upload Aadhar Card Image*</label>
+                <div class="file-upload">
+                    <input type="file" id="aadharDocument" name="aadharDocument" accept="image/*" required>
+                    <div class="file-upload-icon">📄</div>
+                    <div class="file-upload-text">
+                        Click or drag to upload your Aadhar Card<br>
+                        <small>(Supported formats: Image)</small>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" id="submitBtn" disabled>Submit Application</button>
+        </form>
+
+        <div class="loader-container">
+            <div class="loader"></div>
+            <div>Processing your application...</div>
+        </div>
+        
+        <div id="successAnimation" class="success-animation">
+            <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+                <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
+                <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+            </svg>
+        </div>
+        
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('userId');
+        const sessionId = urlParams.get('sessionId');
+        const sendOtpBtn = document.getElementById('sendOtpBtn');
+        const verifyOtpBtn = document.getElementById('verifyOtpBtn');
+        const otpMessage = document.getElementById('otpMessage');
+        const otpInput = document.getElementById('otp');
+        const phoneInput = document.getElementById('phone');
+        const submitBtn = document.getElementById('submitBtn');
+        let otpCooldown = false;
+        let otpVerified = false;
+        let redirectTimeout;
+
+        // Initialize form validation
+        document.getElementById('joinForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!otpVerified) {
+                const status = document.getElementById('status');
+                status.className = 'status error';
+                status.textContent = 'Please verify your phone number with OTP before submitting';
+                status.style.display = 'block';
+                return;
+            }
+            
+            submitForm();
+        });
+
+        // Send OTP function
+        async function sendOTP() {
+            const phone = phoneInput.value;
+
+            // Reset OTP verification status
+            otpVerified = false;
+            otpInput.value = '';
+            submitBtn.disabled = true;
+            verifyOtpBtn.disabled = true;
+
+            if (!phone || !/^\d{10}$/.test(phone)) {
+                otpMessage.textContent = 'Please enter a valid 10-digit phone number';
+                otpMessage.style.color = 'var(--error-color)';
+                return;
+            }
+
+            try {
+                sendOtpBtn.disabled = true;
+                otpMessage.textContent = 'Sending OTP...';
+                otpMessage.style.color = 'var(--text-color)';
+
+                // Make API call to send OTP
+                const response = await fetch('/api/otp/send-otp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        phone, 
+                        userId: userId || 'guest', 
+                        sessionId: sessionId || 'guest-session' 
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Failed to send OTP');
+                }
+
+                otpMessage.innerHTML = `OTP sent to ${phone}! <br>Valid for 5 minutes`;
+                otpMessage.style.color = 'var(--success-color)';
+                
+                // Enable verify button
+                verifyOtpBtn.disabled = false;
+
+                // Enable resend after 30 seconds
+                setTimeout(() => {
+                    sendOtpBtn.disabled = false;
+                    sendOtpBtn.textContent = 'Resend OTP';
+                }, 30000);
+
+            } catch (error) {
+                otpMessage.textContent = error.message || 'Failed to send OTP. Please try again.';
+                otpMessage.style.color = 'var(--error-color)';
+                sendOtpBtn.disabled = false;
+            }
+        }
+
+        // Verify OTP function
+        async function verifyOTP() {
+            const phone = phoneInput.value;
+            const otp = otpInput.value;
+
+            if (!otp || !/^\d{6}$/.test(otp)) {
+                otpMessage.textContent = 'Please enter a valid 6-digit OTP';
+                otpMessage.style.color = 'var(--error-color)';
+                return false;
+            }
+
+            try {
+                verifyOtpBtn.disabled = true;
+                otpMessage.textContent = 'Verifying OTP...';
+                otpMessage.style.color = 'var(--text-color)';
+
+                // Make API call to verify OTP
+                const response = await fetch('/api/otp/verify-otp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        phone, 
+                        otp, 
+                        userId: userId || 'guest', 
+                        sessionId: sessionId || 'guest-session' 
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'OTP verification failed');
+                }
+
+                // OTP verified successfully
+                otpMessage.textContent = 'Phone number verified successfully!';
+                otpMessage.style.color = 'var(--success-color)';
+                otpVerified = true;
+                
+                // Enable submit button
+                submitBtn.disabled = false;
+                
+                // Disable OTP fields after successful verification
+                phoneInput.setAttribute('readonly', 'true');
+                otpInput.setAttribute('readonly', 'true');
+                sendOtpBtn.disabled = true;
+                
+                return true;
+
+            } catch (error) {
+                otpMessage.textContent = error.message || 'OTP verification failed. Please try again.';
+                otpMessage.style.color = 'var(--error-color)';
+                verifyOtpBtn.disabled = false;
+                submitBtn.disabled = true;
+                return false;
+            }
+        }
+
+        // Submit form function
+        async function submitForm() {
+            const loaderContainer = document.querySelector('.loader-container');
+            const status = document.getElementById('status');
+            const successAnimation = document.getElementById('successAnimation');
+
+            submitBtn.disabled = true;
+            loaderContainer.style.display = 'block';
+            status.style.display = 'none';
+
+            try {
+                if (!userId || !sessionId) {
+                    throw new Error('Invalid session. Please start the process from WhatsApp.');
+                }
+
+                const formData = new FormData();
+                formData.append('userId', userId);
+                formData.append('sessionId', sessionId);
+                formData.append('fullName', document.getElementById('fullName').value);
+                formData.append('division', document.getElementById('division').value);
+                formData.append('motivation', document.getElementById('motivation').value);
+                formData.append('address', document.getElementById('address').value);
+                formData.append('phone', phoneInput.value);
+                formData.append('email', document.getElementById('email').value);
+                formData.append('aadharNumber', document.getElementById('aadharNumber').value);
+                formData.append('aadharDocument', document.getElementById('aadharDocument').files[0]);
+
+                const response = await fetch('/api/join-team', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    // Hide the loader
+                    loaderContainer.style.display = 'none';
+                    
+                    // Show success animation
+                    successAnimation.style.display = 'block';
+                    
+                    // Show success message
+                    status.className = 'status success';
+                    status.innerHTML = `
+                        <div style="margin-bottom: 10px">✅ Application submitted successfully!</div>
+                        <div style="font-size: 0.9em; opacity: 0.9">You will receive updates on WhatsApp.</div>
+                        <div style="font-size: 0.9em; margin-top: 10px">Redirecting to WhatsApp in <span id="countdown">3</span> seconds...</div>
+                    `;
+                    status.style.display = 'block';
+
+                    let countdown = 3;
+                    const countdownElement = document.getElementById('countdown');
+                    const timer = setInterval(() => {
+                        countdown--;
+                        countdownElement.textContent = countdown;
+                        if (countdown <= 0) {
+                            clearInterval(timer);
+                            window.location.href = 'https://wa.me/918788649885';
+                        }
+                    }, 1000);
+                    
+                    // Store the timeout for cleanup
+                    redirectTimeout = timer;
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to submit application');
+                }
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = 'Error: ' + error.message;
+                status.style.display = 'block';
+                submitBtn.disabled = !otpVerified;
+            } finally {
+                loaderContainer.style.display = 'none';
+            }
+        }
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (redirectTimeout) {
+                clearTimeout(redirectTimeout);
+            }
+        });
+
+        // Add event listeners
+        sendOtpBtn.addEventListener('click', sendOTP);
+        verifyOtpBtn.addEventListener('click', verifyOTP);
+        
+        // Enable verify button when OTP has 6 digits
+        otpInput.addEventListener('input', function() {
+            verifyOtpBtn.disabled = !(this.value.length === 6);
+        });
+
+        // Reset submit button when phone number changes
+        phoneInput.addEventListener('input', function() {
+            if (otpVerified) {
+                otpVerified = false;
+                submitBtn.disabled = true;
+                phoneInput.removeAttribute('readonly');
+                otpInput.removeAttribute('readonly');
+                otpInput.value = '';
+                sendOtpBtn.disabled = false;
+                sendOtpBtn.textContent = 'Send OTP';
+                verifyOtpBtn.disabled = true;
+                otpMessage.textContent = 'Please verify your new phone number';
+                otpMessage.style.color = 'var(--text-color)';
+            }
+        });
+
+        // Handle file upload visual feedback
+        document.getElementById('aadharDocument').addEventListener('change', function (e) {
+            const fileUpload = e.target.closest('.file-upload');
+            const fileName = e.target.files[0]?.name;
+
+            if (fileName) {
+                fileUpload.classList.add('uploaded');
+                const text = fileUpload.querySelector('.file-upload-text');
+                text.innerHTML = `Selected: ${fileName}<br><small>Click to change file</small>`;
+            } else {
+                fileUpload.classList.remove('uploaded');
+                const text = fileUpload.querySelector('.file-upload-text');
+                text.innerHTML = `Click or drag to upload your Aadhar Card<br>
+                    <small>(Supported formats: Image)</small>`;
+            }
+        });
+    </script>
+</body>
+
+</html>
