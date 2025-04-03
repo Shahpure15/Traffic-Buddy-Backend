@@ -9,14 +9,7 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/server.js",
-      "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "https://traffic-buddy-frontend.vercel.app",
-        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, Access-Control-Allow-Origin",
-        "Access-Control-Allow-Credentials": "true"
-      }
+      "dest": "/server.js"
     }
   ]
 }

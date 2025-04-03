@@ -3,6 +3,10 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authMiddleware, mainAdminOnly } = require('../services/authService');
 
+router.options('/login', (req, res) => {
+    res.status(204).end();
+  });
+
 // Public routes
 router.post('/login', authController.login);
 

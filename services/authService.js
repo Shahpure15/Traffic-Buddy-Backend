@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { Division } = require('../models/Division');
-const e = require('cors');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'traffic-buddy-jwt-secret-key';
 const JWT_EXPIRY = '24h'; // Token expiry time
