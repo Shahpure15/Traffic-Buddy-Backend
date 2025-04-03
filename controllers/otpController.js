@@ -1,5 +1,5 @@
 // controllers/otpController.js
-const OTP = require('../models/otp');
+const OTP = require('../models/OTP');
 const { 
   generateOTP,
   formatPhoneNumber, 
