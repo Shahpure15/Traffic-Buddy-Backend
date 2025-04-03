@@ -250,7 +250,7 @@ app.use(cors({
     'https://traffic-buddy-frontend.vercel.app' 
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Keep allowed methods
-  allowedHeaders: ['Content-Type', 'Authorization'],    // Keep allowed headers
+  allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Origin'], // Keep allowed headers
   credentials: true, // <--- ADD THIS LINE: Allow cookies/credentials to be sent
   optionsSuccessStatus: 204 // <--- ADD THIS LINE: Set success status for OPTIONS preflight (204 No Content is common)
 }));
