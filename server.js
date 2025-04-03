@@ -247,7 +247,8 @@ app.use(cors({
     'http://localhost:5173', 
     'http://localhost:3000', 
     'https://trafficbuddy.yashraj221b.me', 
-    'https://traffic-buddy-frontend.vercel.app'
+    'https://traffic-buddy-frontend.vercel.app',
+    'https://traffic-buddy-backend.vercel.app',
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Origin'],
