@@ -11,6 +11,7 @@ const locationCache = new NodeCache({
   checkperiod: 3600, // Check for expired keys every hour
   useClones: false // Don't clone objects for better performance
 }); 
+const { v4: uuidv4 } = require('uuid');
 
 
 // Load environment variables
@@ -431,199 +432,290 @@ app.get('/api/check-location', async (req, res) => {
 // Find your existing /api/report endpoint and replace it with this
 // Update the /api/report endpoint for immediate response
 app.post('/api/report', upload.single('image'), async (req, res) => {
+  const requestId = uuidv4(); // Unique ID for tracing this specific request
+  console.log(`[${requestId}] ----- NEW REPORT SUBMISSION RECEIVED -----`);
+  console.log(`[${requestId}] Request Body Keys: ${Object.keys(req.body)}`); // Log keys
+  console.log(`[${requestId}] File received: ${!!req.file}`);
+
   try {
-    console.log('----- NEW REPORT SUBMISSION -----');
     // Extract form data
     const { userId, reportType, description, latitude, longitude, address, linkId } = req.body;
-    
-    console.log('Processing report submission:', { userId, reportType, linkId });
-    
-    // Validate required fields
-    if (!userId || !reportType) {
-      return res.status(400).json({ error: 'Missing required fields' });
+
+    // Log essential info early, mask user ID partially if needed for privacy
+    const partialUserId = userId ? userId.substring(0, userId.length - 4) + '****' : 'undefined';
+    console.log(`[${requestId}] Processing report submission for user: ${partialUserId}`, { reportType, linkId, hasLatLng: !!(latitude && longitude), hasFile: !!req.file });
+
+    // Basic validation before sending 200 OK
+    if (!userId || !reportType || !latitude || !longitude) {
+       console.warn(`[${requestId}] Missing required fields`, { userId: !!userId, reportType: !!reportType, latitude: !!latitude, longitude: !!longitude });
+       // Send 400 BEFORE sending 200
+       return res.status(400).json({ 
+           success: false, 
+           error: 'Missing required fields (userId, reportType, latitude, longitude)',
+           requestId 
+       });
     }
-    
-    // Mark the link as used if linkId was provided
+
+    // Mark the link as used if linkId was provided (Keep this synchronous part)
     if (linkId) {
-      // Clean userId consistently, same as in other functions
-      const cleanUserId = userId.replace(/whatsapp:[ ]*/i, '').replace(/^\+/, '');
-      console.log('Marking link as used:', { linkId, cleanUserId });
-      
-      const link = await ReportLink.findOneAndUpdate(
-        { 
-          linkId, 
-          $or: [
-            { userId: cleanUserId },
-            { userId: '+' + cleanUserId }
-          ]
-        },
-        { $set: { used: true, usedAt: new Date() } }
-      );
-      
-      // If link not found, still proceed but log it
-      if (!link) {
-        console.warn(`Link with ID ${linkId} not found in database`);
-      } else {
-        console.log('Link marked as used:', link);
+      try {
+        // Ensure consistent userId cleaning
+        const cleanUserIdNum = userId.replace(/\D/g, ''); // Extract digits
+        const cleanUserId = cleanUserIdNum ? cleanUserIdNum : userId.replace(/whatsapp:[ ]*/i, '').replace(/^\+/, ''); // Fallback cleaning
+        console.log(`[${requestId}] Marking link as used`, { linkId, cleanUserId });
+        
+        const link = await ReportLink.findOneAndUpdate(
+          { 
+            linkId, 
+            // Check both formats robustly
+            $or: [
+              { userId: cleanUserId }, 
+              { userId: '+' + cleanUserId },
+              { userId: { $regex: cleanUserIdNum + '$' } } // Match number ending
+            ]
+          },
+          { $set: { used: true, usedAt: new Date() } },
+          { new: true } // Optional: return updated doc for logging
+        );
+
+        if (!link) {
+          console.warn(`[${requestId}] Link with ID ${linkId} not found or not matching user ${cleanUserId}`);
+        } else {
+          console.log(`[${requestId}] Link marked as used successfully`, { linkId: link.linkId, used: link.used });
+        }
+      } catch(linkError) {
+         // Use console.error for actual errors
+         console.error(`[${requestId}] Error marking link ${linkId} as used: ${linkError.message}`, linkError.stack);
+         // Decide if this error should prevent proceeding. Maybe not critical.
       }
     }
-    
-    // Send immediate success response to client
-    res.status(200).json({ success: true });
-    
-    // Process the report in the background
-    if (req.file) {
-      processReportInBackground(
-        req.file, 
-        latitude, 
-        longitude,
-        description, 
-        userId, 
-        reportType,
-        address
-      ).catch(err => console.error('Background processing error:', err));
-    } else {
-      // If no image, still create the report but without image
-      processReportWithoutImage(
-        latitude,
-        longitude, 
-        description,
-        userId,
-        reportType,
-        address
-      ).catch(err => console.error('Background processing error (no image):', err));
-    }
+
+    // Send immediate success response to client - DO THIS RIGHT BEFORE STARTING BACKGROUND TASK
+    console.log(`[${requestId}] Sending immediate 200 OK response to client.`);
+    res.status(200).json({ success: true, message: "Report received, processing in background.", requestId });
+
+    // --- Start Background Processing ---
+    // Use setImmediate to ensure the response is sent before heavy lifting starts
+    setImmediate(() => {
+       console.log(`[${requestId}] Starting background processing.`);
+       if (req.file) {
+         processReportInBackground(
+           requestId, // Pass request ID for tracing
+           req.file,
+           latitude,
+           longitude,
+           description,
+           userId, // Pass original userId, clean inside background task
+           reportType,
+           address
+         ).catch(err => {
+             // Catch errors specifically from the background promise chain
+             console.error(`[${requestId}] UNCAUGHT error in processReportInBackground promise chain: ${err.message}`, err.stack);
+             // Try to notify an admin or log to a critical error monitoring system if available
+         });
+       } else {
+         console.log(`[${requestId}] No image file provided. Processing report without image.`);
+         processReportWithoutImage(
+           requestId, // Pass request ID
+           latitude,
+           longitude,
+           description,
+           userId, // Pass original userId
+           reportType,
+           address
+         ).catch(err => {
+            // Catch errors specifically from the background promise chain
+            console.error(`[${requestId}] UNCAUGHT error in processReportWithoutImage promise chain: ${err.message}`, err.stack);
+            // Try to notify an admin
+         });
+       }
+    });
+
   } catch (error) {
-    console.error('Error processing report:', error);
-    // Try to send error response if client is still connected
-    try {
-      res.status(500).json({ error: error.message });
-    } catch (responseError) {
-      console.error('Could not send error response:', responseError);
+    // This catch block only handles errors during the *synchronous* part of the request
+    console.error(`[${requestId}] Error during initial report request handling: ${error.message}`, error.stack);
+    // Try to send error response if headers haven't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to initiate report processing.', requestId });
     }
   }
 });
 
 // Function to process reports without images
-async function processReportWithoutImage(latitude, longitude, description, userId, reportType, address) {
+async function processReportWithoutImage(requestId, latitude, longitude, description, originalUserId, reportType, address) {
+  let cleanUserId = null; // Define upfront
+
+  // Wrap the entire function body in try...catch
   try {
-    // Clean userId format
-    const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-    console.log(`Cleaned userId for processing without image: ${cleanUserId}`);
-    
-    // Similar to processReportInBackground but without image upload
-    const reportTypes = {
-      '1': 'Traffic Violation',
-      '2': 'Traffic Congestion',
-      '3': 'Irregularity', // Changed from 'Accident' to 'Irregularity'
-      '4': 'Road Damage',
-      '5': 'Illegal Parking',
-      '6': 'Traffic Signal Issue',
-      '7': 'Suggestion'
-    };
-    const queryTypeText = reportTypes[reportType] || 'Report';
-    
-    // Find which division this location belongs to
-    let division = null;
-    let divisionName = 'Unknown';
-    
-    if (latitude && longitude) {
-      division = await findDivisionForLocation(latitude, longitude);
-      if (division) {
-        divisionName = division.name;
-      } else {
-        // Location outside jurisdiction - inform user and stop
-        try {
-          await sendWhatsAppMessage(
-            cleanUserId,
-            getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
-          );
-        } catch (notifyError) {
-          console.error('Error notifying user about location outside jurisdiction:', notifyError);
-        }
-        return;
-      }
-    }
-    
-    // Get user information for the report
-    let userName = 'Anonymous';
-    try {
-      const userSession = await Session.findOne({ 
-        user_id: { $in: [userId, cleanUserId] } // Try both formats
-      });
-      if (userSession && userSession.user_name) {
-        userName = userSession.user_name;
-      }
-    } catch (userError) {
-      console.error('Error retrieving user name:', userError);
-    }
-    
-    // Create new query document
-    const newQuery = new Query({
-      user_id: cleanUserId, // Store the cleaned ID
-      user_name: userName,
-      query_type: queryTypeText,
-      description,
-      photo_url: null, // No photo
-      location: {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        address: address || 'Unknown location'
-      },
-      status: 'Pending',
-      timestamp: new Date(),
-      division: division ? division._id : null,
-      divisionName
-    });
-    
-    // Save the query
-    await newQuery.save();
-    console.log(`New ${queryTypeText} report (no image) saved with ID: ${newQuery._id}`);
-    
-    // Notify division officers if division was found
-    if (division) {
+      console.log(`[${requestId}] Inside processReportWithoutImage for original user ID: ${originalUserId}`);
+
+      // --- Clean userId format ---
       try {
-        console.log(`Notifying officers of division: ${division.name}`);
-        const notifiedContacts = await notifyDivisionOfficers(newQuery, division);
-        
-        // Update query with notification status
-        if (notifiedContacts.length > 0) {
-          await Query.findByIdAndUpdate(newQuery._id, {
-            divisionNotified: true,
-            divisionOfficersNotified: notifiedContacts.map(phone => ({
-              phone,
-              timestamp: new Date()
-            }))
-          });
-          console.log(`Notification status updated for query ${newQuery._id}`);
-        }
-      } catch (notificationError) {
-        console.error('Error notifying division officers:', notificationError);
+          const digits = originalUserId.replace(/\D/g, '');
+          if (digits) {
+               const numberPart = digits.startsWith('91') && digits.length > 10 
+                               ? digits.substring(2)
+                               : (digits.length > 10 ? digits.substring(digits.length - 10) : digits);
+              cleanUserId = `whatsapp:+91${numberPart}`;
+              console.log(`[${requestId}] Cleaned userId (no image): ${cleanUserId} (from original: ${originalUserId})`);
+          } else {
+              throw new Error('Could not extract digits from userId');
+          }
+      } catch (cleanError) {
+          console.error(`[${requestId}] Failed to clean userId (no image): ${originalUserId} - ${cleanError.message}`);
+          return;
       }
-    }
-    
-    // Send confirmation to user
-    try {
-      await sendWhatsAppMessage(
-        cleanUserId,
-        `Thank you! Your ${queryTypeText} report has been submitted successfully and assigned to the ${divisionName} division. You will be notified when there are updates.`
-      );
-    } catch (notifyError) {
-      console.error('Error sending confirmation to user:', notifyError);
-    }
+
+      // --- 1. Find Division ---
+      let division = null;
+      let divisionName = 'Unknown';
+      if (latitude && longitude) {
+          try {
+              console.log(`[${requestId}] Checking jurisdiction (no image) for lat: ${latitude}, lng: ${longitude}`);
+              division = await findDivisionForLocation(latitude, longitude);
+              if (division) {
+                  divisionName = division.name;
+                  console.log(`[${requestId}] Location (no image) is within jurisdiction: ${divisionName} (${division._id})`);
+              } else {
+                  console.log(`[${requestId}] Location (no image) (${latitude}, ${longitude}) is outside PCMC jurisdiction.`);
+                  try {
+                      await sendWhatsAppMessage(cleanUserId, getText('LOCATION_OUTSIDE_JURISDICTION', 'en'));
+                      console.log(`[${requestId}] Notified user ${cleanUserId} (no image) about being outside jurisdiction.`);
+                  } catch (notifyError) {
+                      console.error(`[${requestId}] Failed to notify user ${cleanUserId} (no image) about being outside jurisdiction: ${notifyError.message}`);
+                  }
+                  return;
+              }
+          } catch (divisionError) {
+              console.error(`[${requestId}] Error calling findDivisionForLocation (no image): ${divisionError.message}`, divisionError.stack);
+              try {
+                  await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
+                  console.log(`[${requestId}] Notified user ${cleanUserId} (no image) about jurisdiction check failure.`);
+              } catch (notifyError) {
+                  console.error(`[${requestId}] Failed to notify user ${cleanUserId} (no image) about jurisdiction check failure: ${notifyError.message}`);
+              }
+              return;
+          }
+      } else {
+          console.warn(`[${requestId}] No latitude/longitude provided for no-image report. Cannot assign division.`);
+          try {
+              await sendWhatsAppMessage(cleanUserId, "Location data was missing, cannot process the report.");
+              console.log(`[${requestId}] Notified user ${cleanUserId} (no image) about missing location.`);
+          } catch (notifyError) {
+              console.error(`[${requestId}] Failed to notify user ${cleanUserId} (no image) about missing location: ${notifyError.message}`);
+          }
+          return;
+      }
+
+      // --- 2. Get User Name ---
+      let userName = 'Anonymous';
+      try {
+          console.log(`[${requestId}] Retrieving user session (no image) for ID: ${cleanUserId}`);
+          const userSession = await getUserSession(cleanUserId);
+          if (userSession && userSession.user_name) {
+              userName = userSession.user_name;
+              console.log(`[${requestId}] Found user name (no image): ${userName}`);
+          } else {
+              console.log(`[${requestId}] No user name found (no image) for ${cleanUserId}.`);
+          }
+      } catch (userError) {
+          console.error(`[${requestId}] Error retrieving user session/name (no image) for ${cleanUserId}: ${userError.message}`, userError.stack);
+      }
+
+      // --- 3. Prepare Query Data ---
+      const reportTypes = { /* ... same as before ... */ };
+      const queryTypeText = reportTypes[reportType] || 'Report';
+      const queryData = {
+          user_id: cleanUserId,
+          user_name: userName,
+          query_type: queryTypeText,
+          description,
+          photo_url: null, // Explicitly null
+          location: {
+              latitude: parseFloat(latitude),
+              longitude: parseFloat(longitude),
+              address: address || 'Address not provided'
+          },
+          status: 'Pending',
+          timestamp: new Date(),
+          division: division ? division._id : null,
+          divisionName,
+          // associatedRequestId: requestId
+      };
+      console.log(`[${requestId}] Query data prepared (no image) for type: ${queryTypeText}, division: ${divisionName}`);
+
+      // --- 4. Save Query ---
+      let savedQuery = null;
+      try {
+          console.log(`[${requestId}] Saving query (no image) to database...`);
+          const newQuery = new Query(queryData);
+          savedQuery = await newQuery.save();
+          console.log(`[${requestId}] Query (no image) saved successfully with ID: ${savedQuery._id}`);
+      } catch (dbError) {
+          console.error(`[${requestId}] Error saving query (no image) to database: ${dbError.message}`, { stack: dbError.stack, queryData: { userId: queryData.user_id } });
+          try {
+              await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
+              console.log(`[${requestId}] Notified user ${cleanUserId} (no image) about database save failure.`);
+          } catch (notifyError) {
+              console.error(`[${requestId}] Failed to notify user ${cleanUserId} (no image) about database save failure: ${notifyError.message}`);
+          }
+          return;
+      }
+
+      // --- 5. Notify Division Officers (if division found) ---
+      if (division) {
+          console.log(`[${requestId}] Initiating officer notifications (no image) for query ${savedQuery._id}`);
+          try {
+              const notifiedContacts = await notifyDivisionOfficers(savedQuery, division);
+              console.log(`[${requestId}] Notified ${notifiedContacts.length} division officers (no image) for query ${savedQuery._id}`);
+              // Update query with notification status
+              try {
+                  await Query.findByIdAndUpdate(savedQuery._id, {
+                      divisionNotified: notifiedContacts.length > 0,
+                      divisionOfficersNotified: notifiedContacts.map(phone => ({ phone, timestamp: new Date() }))
+                  });
+                  console.log(`[${requestId}] Updated query ${savedQuery._id} (no image) notification status.`);
+              } catch (updateErr) {
+                  console.error(`[${requestId}] Failed to update query ${savedQuery._id} (no image) with notification status: ${updateErr.message}`);
+              }
+          } catch (notificationError) {
+              console.error(`[${requestId}] Error during notifyDivisionOfficers (no image) for query ${savedQuery._id}: ${notificationError.message}`, notificationError.stack);
+          }
+      } else {
+          console.log(`[${requestId}] Skipping officer notification as no division was assigned for query ${savedQuery._id}`);
+      }
+
+      // --- 6. Send Confirmation to User ---
+      console.log(`[${requestId}] Sending user confirmation (no image) for query ${savedQuery._id}`);
+      const confirmationMessage = `Thank you! Your ${queryTypeText} report (ID: ${savedQuery._id.toString().slice(-6)}) has been submitted to the ${divisionName} division. Updates will follow. Send Any for more options.`;
+      try {
+          await sendWhatsAppMessage(cleanUserId, confirmationMessage);
+          console.log(`[${requestId}] Successfully sent confirmation (no image) to user ${cleanUserId}.`);
+      } catch (confError) {
+          console.error(`[${requestId}] Failed to send confirmation (no image) to user ${cleanUserId}: ${confError.message}`, confError.stack);
+      }
+
+      console.log(`[${requestId}] Background processing (no image) completed successfully for query ${savedQuery._id}`);
+
   } catch (error) {
-    console.error('Error processing report without image:', error);
-    
-    // Try to notify user of failure
-    try {
-      const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-      await sendWhatsAppMessage(
-        cleanUserId,
-        getText('REPORT_ERROR', 'en')
-      );
-    } catch (notifyError) {
-      console.error('Error notifying user of failure:', notifyError);
-    }
+      // --- CATCH ALL FOR THE ENTIRE BACKGROUND TASK (NO IMAGE) ---
+       console.error(`[${requestId}] !!! CRITICAL UNHANDLED ERROR in processReportWithoutImage !!!`, {
+           errorMessage: error.message,
+           stack: error.stack,
+           originalUserId, 
+           cleanUserId,
+           location: { latitude, longitude }
+       });
+      if (cleanUserId) {
+          try {
+              await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
+               console.log(`[${requestId}] Notified user ${cleanUserId} (no image) about critical background failure.`);
+          } catch (notifyError) {
+              console.error(`[${requestId}] Failed to notify user ${cleanUserId} (no image) about critical background failure: ${notifyError.message}`);
+          }
+      } else {
+          console.error(`[${requestId}] Cannot notify user (no image) of critical failure, cleanUserId unknown/failed to determine.`);
+      }
   }
 }
 
@@ -632,139 +724,210 @@ async function processReportWithoutImage(latitude, longitude, description, userI
 // Find this function in server.js and replace it with this version
 
 // Replace the existing processReportInBackground function with this fixed version
-async function processReportInBackground(file, latitude, longitude, description, userId, reportType, address) {
+async function processReportInBackground(requestId, file, latitude, longitude, description, originalUserId, reportType, address) {
+  let cleanUserId = null; // Define upfront for use in final catch block
+
+  // Wrap the entire function body in try...catch
   try {
-    console.log(`Starting background processing for report from user ${userId}`);
-    
-    // Parse userId to get the phone number without duplicated prefixes
-    const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-    console.log(`Cleaned userId for notifications: ${cleanUserId}`);
-    
-    // Check if location is in a division
-    console.log('Checking if location is within any division...');
-    const matchingDivision = await findDivisionForLocation(latitude, longitude);
-    
-    // If location is not in any division, inform the user and stop further processing
-    if (!matchingDivision) {
-      console.log('Location is outside PCMC jurisdiction');
-      try {
-        await sendWhatsAppMessage(
-          cleanUserId,
-          getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
-        );
-      } catch (notifyError) {
-        console.error('Error notifying user about location outside jurisdiction:', notifyError);
-      }
-      return;
-    }
-    
-    // Upload image - now properly handling file object from multer
-    let uploadedUrl = null;
+    console.log(`[${requestId}] Inside processReportInBackground for original user ID: ${originalUserId}`);
+
+    // --- Clean userId format (ensure consistency) ---
     try {
-      console.log('Uploading image to R2...');
-      uploadedUrl = await uploadImageToR2(file);
-      console.log('Image uploaded successfully:', uploadedUrl);
-    } catch (uploadError) {
-      console.error('Failed to upload image:', uploadError);
-      // Continue without image if upload fails
+      const digits = originalUserId.replace(/\D/g, ''); // Remove all non-digits
+      if (digits) {
+        // Handle potential leading country codes already present
+        const numberPart = digits.startsWith('91') && digits.length > 10 
+                           ? digits.substring(2) // Remove leading 91 if length > 10
+                           : (digits.length > 10 ? digits.substring(digits.length - 10) : digits); // Otherwise get last 10 or fewer
+        cleanUserId = `whatsapp:+91${numberPart}`; // Standard format
+        console.log(`[${requestId}] Cleaned userId for notifications: ${cleanUserId} (from original: ${originalUserId})`);
+      } else {
+         throw new Error('Could not extract digits from userId');
+      }
+    } catch (cleanError) {
+       console.error(`[${requestId}] Failed to clean userId: ${originalUserId} - ${cleanError.message}`);
+       // Cannot proceed without a valid recipient ID
+       return;
     }
-    
-    // FIXED: Get user's session to retrieve their name
-    // The issue was in how we were looking up the session
+
+    // --- 1. Check if location is in a division ---
+    let matchingDivision = null;
+    try {
+        console.log(`[${requestId}] Checking jurisdiction for lat: ${latitude}, lng: ${longitude}`);
+        matchingDivision = await findDivisionForLocation(latitude, longitude);
+    } catch (divisionError) {
+        console.error(`[${requestId}] Error calling findDivisionForLocation: ${divisionError.message}`, divisionError.stack);
+        // Attempt to notify user of technical difficulty
+        try {
+            await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
+            console.log(`[${requestId}] Notified user ${cleanUserId} about jurisdiction check failure.`);
+        } catch (notifyError) {
+            console.error(`[${requestId}] Failed to notify user ${cleanUserId} about jurisdiction check failure: ${notifyError.message}`);
+        }
+        return; // Stop processing
+    }
+
+    // If location is not in any division
+    if (!matchingDivision) {
+      console.log(`[${requestId}] Location (${latitude}, ${longitude}) is outside PCMC jurisdiction.`);
+      try {
+          await sendWhatsAppMessage(cleanUserId, getText('LOCATION_OUTSIDE_JURISDICTION', 'en'));
+          console.log(`[${requestId}] Notified user ${cleanUserId} about being outside jurisdiction.`);
+      } catch (notifyError) {
+          console.error(`[${requestId}] Failed to notify user ${cleanUserId} about being outside jurisdiction: ${notifyError.message}`);
+      }
+      return; // Stop further processing
+    }
+    console.log(`[${requestId}] Location is within jurisdiction: ${matchingDivision.name} (${matchingDivision._id})`);
+
+
+    // --- 2. Upload image ---
+    let uploadedUrl = null;
+    if (file) { // Check if file actually exists
+        try {
+            console.log(`[${requestId}] Uploading image to R2...`);
+            uploadedUrl = await uploadImageToR2(file); // Assuming uploadImageToR2 handles buffer/base64 correctly now
+            if (!uploadedUrl) {
+                console.warn(`[${requestId}] uploadImageToR2 returned null/empty URL.`);
+                // Notify user? - Define IMAGE_UPLOAD_FAILED text if needed
+                // try { await sendWhatsAppMessage(cleanUserId, getText('IMAGE_UPLOAD_FAILED', 'en')); } catch (e) {}
+            } else {
+                console.log(`[${requestId}] Image uploaded successfully: ${uploadedUrl}`);
+            }
+        } catch (uploadError) {
+            console.error(`[${requestId}] Failed to upload image: ${uploadError.message}`, uploadError.stack);
+            uploadedUrl = null; // Ensure it's null on failure
+            // Optionally notify user image upload failed
+            try {
+                 await sendWhatsAppMessage(cleanUserId, "There was an issue uploading your image, but the report is being processed."); 
+                 console.log(`[${requestId}] Notified user ${cleanUserId} about image upload failure.`);
+            } catch (notifyError) {
+                 console.error(`[${requestId}] Failed to notify user ${cleanUserId} about image upload failure: ${notifyError.message}`);
+            }
+        }
+    } else {
+        console.log(`[${requestId}] No file provided, skipping image upload.`);
+    }
+
+
+    // --- 3. Get user's name from Session ---
     let userName = 'Anonymous';
     try {
-      // First try an exact match
-      const formattedUserId = `whatsapp:+${userId.replace(/^\+|whatsapp:[ ]*(\+?)/gi, '')}`;
-      console.log('Looking for session with user_id:', formattedUserId);
-      
-      let userSession = await Session.findOne({ user_id: formattedUserId });
-      
-      // If not found, try with just the number
-      if (!userSession) {
-        const phoneNumber = userId.replace(/^\+|whatsapp:[ ]*(\+?)/gi, '');
-        console.log('Looking for session with phone number in user_id:', phoneNumber);
-        userSession = await Session.findOne({ user_id: { $regex: phoneNumber } });
-      }
-      
-      if (userSession && userSession.user_name) {
-        userName = userSession.user_name;
-        console.log(`Found user name in session: ${userName}`);
-      } else {
-        console.log('No user name found in session, using Anonymous');
-      }
+        console.log(`[${requestId}] Retrieving user session for ID: ${cleanUserId}`);
+        const userSession = await getUserSession(cleanUserId); // Use the cleaned ID
+        if (userSession && userSession.user_name) {
+            userName = userSession.user_name;
+            console.log(`[${requestId}] Found user name in session: ${userName}`);
+        } else {
+            console.log(`[${requestId}] No user name found in session for ${cleanUserId}. Using Anonymous.`);
+        }
     } catch (userError) {
-      console.error('Error retrieving user name:', userError);
+        console.error(`[${requestId}] Error retrieving user session/name for ${cleanUserId}: ${userError.message}`, userError.stack);
+        // Continue with 'Anonymous' name
     }
-    
-    // Get the query type text based on the report type number
+
+    // --- 4. Prepare Query Data ---
     const reportTypes = {
-      '1': 'Traffic Violation',
-      '2': 'Traffic Congestion',
-      '3': 'Irregularity', // Changed from 'Accident' to 'Irregularity'
-      '4': 'Road Damage',
-      '5': 'Illegal Parking',
-      '6': 'Traffic Signal Issue',
+      '1': 'Traffic Violation', '2': 'Traffic Congestion', '3': 'Irregularity',
+      '4': 'Road Damage', '5': 'Illegal Parking', '6': 'Traffic Signal Issue',
       '7': 'Suggestion'
     };
     const queryTypeText = reportTypes[reportType] || 'Report';
+    console.log(`[${requestId}] Report type selected: ${reportType} -> ${queryTypeText}`);
 
-    // Create query object with user name
-    const query = new Query({
-      user_id: cleanUserId,
-      user_name: userName, // Now this should have the correct name
+    const queryData = {
+      user_id: cleanUserId, // Use the cleaned ID
+      user_name: userName,
       query_type: queryTypeText,
       description: description || 'No description provided',
       location: {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
-        address: address || 'Unknown location'
+        address: address || 'Address not provided'
       },
       photo_url: uploadedUrl,
       division: matchingDivision._id,
       divisionName: matchingDivision.name,
       status: 'Pending',
-      timestamp: new Date()
-    });
+      timestamp: new Date(),
+      // associatedRequestId: requestId // Optional: Add for DB tracing
+    };
+    // Avoid logging full query data if it contains sensitive info
+    console.log(`[${requestId}] Query data prepared for type: ${queryTypeText}, division: ${matchingDivision.name}`);
 
-    console.log(`Creating query with user_name: ${userName}`);
-    
-    // Save the query
-    await query.save();
-    console.log(`Query saved with ID: ${query._id}`);
-    
-    // Send confirmation to user immediately after saving the query
-    const confirmationPromise = sendWhatsAppMessage(
-      cleanUserId,
-      `Thank you! Your ${queryTypeText} report has been submitted successfully and assigned to the ${matchingDivision.name} division. You will be notified when there are updates. Feel free to send another message in case of more reports.`
-    );
-    
-    // Notify division officers in parallel
-    const notificationPromise = notifyDivisionOfficers(query, matchingDivision)
-      .then(notifiedContacts => {
-        console.log(`Notified ${notifiedContacts.length} division officers`);
-        return notifiedContacts;
-      })
-      .catch(error => {
-        console.error('Error notifying division officers:', error);
-        return [];
-      });
-    
-    // Wait for both operations to complete
-    await Promise.all([confirmationPromise, notificationPromise]);
-    
-    console.log('Background processing completed successfully');
-  } catch (error) {
-    console.error('Error in background processing:', error);
-    
-    // Notify user of failure
+
+    // --- 5. Save the query ---
+    let savedQuery = null;
     try {
-      const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-      await sendWhatsAppMessage(
-        cleanUserId,
-        getText('REPORT_ERROR', 'en')
-      );
-    } catch (notifyError) {
-      console.error('Error notifying user of failure:', notifyError);
+        console.log(`[${requestId}] Saving query to database...`);
+        const query = new Query(queryData);
+        savedQuery = await query.save();
+        console.log(`[${requestId}] Query saved successfully with ID: ${savedQuery._id}`);
+    } catch (dbError) {
+        console.error(`[${requestId}] Error saving query to database: ${dbError.message}`, { stack: dbError.stack, queryData: { userId: queryData.user_id } }); // Log partial data
+        // Notify user of technical difficulty
+        try {
+            await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
+            console.log(`[${requestId}] Notified user ${cleanUserId} about database save failure.`);
+        } catch (notifyError) {
+            console.error(`[${requestId}] Failed to notify user ${cleanUserId} about database save failure: ${notifyError.message}`);
+        }
+        return; // Stop processing
+    }
+
+
+    // --- 6. Send Confirmation and Notifications (run sequentially for simpler error handling without Promise.all) ---
+    console.log(`[${requestId}] Sending user confirmation for query ${savedQuery._id}`);
+    const confirmationMessage = `Thank you! Your ${queryTypeText} report (ID: ${savedQuery._id.toString().slice(-6)}) has been submitted to the ${matchingDivision.name} division. Updates will follow. Send Any for more options.`;
+    
+    try {
+        await sendWhatsAppMessage(cleanUserId, confirmationMessage);
+        console.log(`[${requestId}] Successfully sent confirmation to user ${cleanUserId}.`);
+    } catch(confError) {
+        console.error(`[${requestId}] Failed to send confirmation to user ${cleanUserId}: ${confError.message}`, confError.stack);
+        // Continue anyway, officer notification is important too
+    }
+
+    console.log(`[${requestId}] Initiating officer notifications for query ${savedQuery._id}`);
+    try {
+        const notifiedContacts = await notifyDivisionOfficers(savedQuery, matchingDivision);
+        console.log(`[${requestId}] Notified ${notifiedContacts.length} division officers for query ${savedQuery._id}`);
+        // Update query in DB with notification status (fire-and-forget or await if needed)
+        try {
+            await Query.findByIdAndUpdate(savedQuery._id, {
+                 divisionNotified: notifiedContacts.length > 0,
+                 divisionOfficersNotified: notifiedContacts.map(phone => ({ phone, timestamp: new Date() }))
+            });
+            console.log(`[${requestId}] Updated query ${savedQuery._id} notification status.`);
+        } catch (updateErr) {
+             console.error(`[${requestId}] Failed to update query ${savedQuery._id} with notification status: ${updateErr.message}`);
+        }
+    } catch (notificationError) {
+        console.error(`[${requestId}] Error during notifyDivisionOfficers for query ${savedQuery._id}: ${notificationError.message}`, notificationError.stack);
+        // Logged the error, processing continues (user was already confirmed)
+    }
+
+    console.log(`[${requestId}] Background processing completed successfully for query ${savedQuery._id}`);
+
+  } catch (error) {
+    // --- CATCH ALL FOR THE ENTIRE BACKGROUND TASK ---
+    console.error(`[${requestId}] !!! CRITICAL UNHANDLED ERROR in processReportInBackground !!!`, {
+        errorMessage: error.message,
+        stack: error.stack,
+        originalUserId, // Log original ID for context
+        cleanUserId,    // Log cleaned ID if available
+        location: { latitude, longitude }
+    });
+    // Attempt to notify the user about the failure IF cleanUserId was determined
+    if (cleanUserId) {
+        try {
+            await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
+            console.log(`[${requestId}] Notified user ${cleanUserId} about critical background failure.`);
+        } catch (notifyError) {
+            console.error(`[${requestId}] Failed to notify user ${cleanUserId} about critical background failure: ${notifyError.message}`);
+        }
+    } else {
+        console.error(`[${requestId}] Cannot notify user of critical failure, cleanUserId unknown/failed to determine.`);
     }
   }
 }
