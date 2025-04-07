@@ -406,6 +406,7 @@ app.get('/api/check-location', async (req, res) => {
 // Update the report endpoint
 
 // Update the /api/report endpoint
+// Find the /api/report endpoint and replace it with this version
 app.post('/api/report', upload.single('image'), async (req, res) => {
   const requestId = Date.now().toString(36) + Math.random().toString(36).substring(2);
   
@@ -422,19 +423,25 @@ app.post('/api/report', upload.single('image'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
     
+    // Import normalized user ID function
+    const { normalizeUserId } = require('./utils/userHelper');
+    
+    // Clean userId format consistently
+    const cleanUserId = normalizeUserId(userId);
+    console.log(`[${requestId}] Normalized userId: ${cleanUserId}`);
+    
     // Mark the link as used if linkId was provided
     if (linkId) {
       try {
-        const { normalizeUserId } = require('./utils/userHelper');
-        const cleanUserId = normalizeUserId(userId, false);
-        console.log(`[${requestId}] Marking link as used: ${linkId} for user ${cleanUserId}`);
+        const cleanUserIdWithoutPrefix = normalizeUserId(userId, false);
+        console.log(`[${requestId}] Marking link as used: ${linkId} for user ${cleanUserIdWithoutPrefix}`);
         
         await ReportLink.findOneAndUpdate(
           { 
             linkId, 
             $or: [
-              { userId: cleanUserId },
-              { userId: '+' + cleanUserId }
+              { userId: cleanUserIdWithoutPrefix },
+              { userId: '+' + cleanUserIdWithoutPrefix }
             ]
           },
           { $set: { used: true, usedAt: new Date() } }
@@ -444,19 +451,32 @@ app.post('/api/report', upload.single('image'), async (req, res) => {
       }
     }
     
-    // Send immediate success response to client to prevent timeouts
-    res.status(202).json({ 
-      success: true, 
-      requestId,
-      message: 'Report received and is being processed'
-    });
+    // First, check if location is in a division BEFORE sending response
+    console.log(`[${requestId}] Checking if location is within any division...`);
+    const matchingDivision = await findDivisionForLocation(latitude, longitude);
     
-    // Process the report
-    console.log(`[${requestId}] Starting background processing`);
-    let processingResult;
+    // If location is not in any division, inform the user immediately and stop
+    if (!matchingDivision) {
+      console.log(`[${requestId}] Location is outside PCMC jurisdiction`);
+      
+      // Send message to user BEFORE responding to client
+      await sendWhatsAppMessage(
+        cleanUserId,
+        getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
+      );
+      
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Location outside jurisdiction',
+        message: 'This location is outside PCMC jurisdiction. We can only process reports within PCMC limits.'
+      });
+    }
+    
+    // Process the report based on whether there's an image or not
+    let processingPromise;
     
     if (req.file) {
-      processingResult = await processReportInBackground(
+      processingPromise = processReportInBackground(
         req.file, 
         latitude, 
         longitude,
@@ -466,8 +486,7 @@ app.post('/api/report', upload.single('image'), async (req, res) => {
         address
       );
     } else {
-      // If no image, still create the report but without image
-      processingResult = await processReportWithoutImage(
+      processingPromise = processReportWithoutImage(
         latitude,
         longitude, 
         description,
@@ -477,17 +496,28 @@ app.post('/api/report', upload.single('image'), async (req, res) => {
       );
     }
     
-    console.log(`[${requestId}] Background processing completed with result:`, processingResult);
+    // Important: Wait for the processing to finish before responding
+    // This is critical to ensure WhatsApp confirmation is sent
+    const processingResult = await processingPromise;
+    console.log(`[${requestId}] Processing completed with result:`, processingResult);
+    
+    // Now that processing is complete and WhatsApp message is sent, respond to client
+    return res.status(200).json({ 
+      success: true,
+      requestId,
+      message: 'Report processed successfully',
+      divisionName: processingResult.division || 'Unknown'
+    });
     
   } catch (error) {
     console.error(`[${requestId}] Error processing report:`, error);
     
-    // Try to send error response if headers haven't been sent
+    // Try to send error response to client
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: error.message });
     }
     
-    // Try to notify the user of failure
+    // Try to notify user of failure
     try {
       const { normalizeUserId } = require('./utils/userHelper');
       const cleanUserId = normalizeUserId(req.body.userId);
