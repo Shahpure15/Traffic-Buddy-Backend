@@ -37,6 +37,8 @@ const TeamApplication = require('./models/TeamApplication');
 const Departments = require('./models/Departments');
 const EmailRecord = require('./models/Departments');
 const ReportLink = require('./models/ReportLink');
+const requestLogger = require('./middleware/requestLogger');
+
 
 // Import routes
 const uploadRoutes = require('./routes/upload');
@@ -84,8 +86,7 @@ if (missingEnvVars.length > 0) {
 // Utility function to find which division a location belongs to
 // Replace the findDivisionForLocation function with this improved version
 
-// Replace the existing findDivisionForLocation function with this fixed version
-// Update the findDivisionForLocation function to remove fallback to DIGHI ALANDI
+// Replace the existing findDivisionForLocation function
 async function findDivisionForLocation(latitude, longitude) {
   try {
     // Input validation
@@ -103,50 +104,28 @@ async function findDivisionForLocation(latitude, longitude) {
       return null;
     }
     
-    // First check the cache with precise coordinates
+    console.log(`Finding division for location: [${lat}, ${lng}]`);
+    
+    // Check cache first
     const cacheKey = `${lat.toFixed(6)},${lng.toFixed(6)}`;
     const cachedDivision = locationCache.get(cacheKey);
     if (cachedDivision) {
-      console.log(`Cache hit for location: ${cacheKey}`);
-      // Get the full division document from database only if we have a valid division
+      console.log(`Cache hit for location ${cacheKey}`);
       if (cachedDivision._id) {
         return await Division.findById(cachedDivision._id);
-      } else {
-        console.log('Cached location is marked as outside jurisdiction');
-        return null;
       }
+      return null; // Outside jurisdiction based on cache
     }
-    
-    console.log(`Finding division for location: ${lat}, ${lng}`);
     
     // Get all divisions
     const divisions = await Division.find();
     console.log(`Checking against ${divisions.length} divisions`);
     
-    // Define a bounding box for PCMC area (rough estimate)
-    // These coordinates represent a rectangular area covering PCMC
-    const pcmcBounds = {
-      minLat: 18.44, // Southern border
-      maxLat: 18.85, // Northern border
-      minLng: 73.69, // Western border
-      maxLng: 74.06  // Eastern border
-    };
-    
-    // Check if the location is even in the general PCMC area
-    if (lat < pcmcBounds.minLat || lat > pcmcBounds.maxLat || 
-        lng < pcmcBounds.minLng || lng > pcmcBounds.maxLng) {
-      console.log('Location is outside the PCMC area');
-      // Cache this location as outside jurisdiction
-      locationCache.set(cacheKey, { outside: true });
-      return null;
-    }
-    
-    // Test each division with valid boundaries
+    // Test each division
     for (const division of divisions) {
       if (!division.boundaries || !division.boundaries.coordinates || 
           !Array.isArray(division.boundaries.coordinates) || 
-          division.boundaries.coordinates.length === 0 ||
-          !Array.isArray(division.boundaries.coordinates[0])) {
+          division.boundaries.coordinates.length === 0) {
         continue; // Skip divisions with invalid boundary data
       }
       
@@ -160,7 +139,7 @@ async function findDivisionForLocation(latitude, longitude) {
       // Check if the point is inside this division
       if (isPointInPolygon([lng, lat], polygon)) {
         console.log(`Found matching division: ${division.name}`);
-        // Cache division ID and name for future lookups
+        // Cache this result
         locationCache.set(cacheKey, { 
           _id: division._id, 
           name: division.name 
@@ -169,11 +148,8 @@ async function findDivisionForLocation(latitude, longitude) {
       }
     }
     
-    // If we reach here, the location is not in any specific division
-    // But it's within the PCMC bounding box
+    // If we reach here, the location is not in any division
     console.log('Location is not within any defined division boundary');
-    
-    // Cache this result to avoid repeated checks
     locationCache.set(cacheKey, { outside: true });
     return null;
   } catch (error) {
@@ -234,6 +210,7 @@ function isPointInPolygon(point, polygon) {
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(requestLogger);
 
 // Enable CORS
 // app.use(cors({
@@ -428,52 +405,58 @@ app.get('/api/check-location', async (req, res) => {
 // Endpoint to handle reports from the capture page
 // Update the report endpoint
 
-// Find your existing /api/report endpoint and replace it with this
-// Update the /api/report endpoint for immediate response
+// Update the /api/report endpoint
 app.post('/api/report', upload.single('image'), async (req, res) => {
+  const requestId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+  
   try {
-    console.log('----- NEW REPORT SUBMISSION -----');
+    console.log(`[${requestId}] ----- NEW REPORT SUBMISSION -----`);
     // Extract form data
     const { userId, reportType, description, latitude, longitude, address, linkId } = req.body;
     
-    console.log('Processing report submission:', { userId, reportType, linkId });
+    console.log(`[${requestId}] Processing report from user ${userId}, type: ${reportType}`);
     
     // Validate required fields
     if (!userId || !reportType) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      console.error(`[${requestId}] Missing required fields: userId or reportType`);
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
     
     // Mark the link as used if linkId was provided
     if (linkId) {
-      // Clean userId consistently, same as in other functions
-      const cleanUserId = userId.replace(/whatsapp:[ ]*/i, '').replace(/^\+/, '');
-      console.log('Marking link as used:', { linkId, cleanUserId });
-      
-      const link = await ReportLink.findOneAndUpdate(
-        { 
-          linkId, 
-          $or: [
-            { userId: cleanUserId },
-            { userId: '+' + cleanUserId }
-          ]
-        },
-        { $set: { used: true, usedAt: new Date() } }
-      );
-      
-      // If link not found, still proceed but log it
-      if (!link) {
-        console.warn(`Link with ID ${linkId} not found in database`);
-      } else {
-        console.log('Link marked as used:', link);
+      try {
+        const { normalizeUserId } = require('./utils/userHelper');
+        const cleanUserId = normalizeUserId(userId, false);
+        console.log(`[${requestId}] Marking link as used: ${linkId} for user ${cleanUserId}`);
+        
+        await ReportLink.findOneAndUpdate(
+          { 
+            linkId, 
+            $or: [
+              { userId: cleanUserId },
+              { userId: '+' + cleanUserId }
+            ]
+          },
+          { $set: { used: true, usedAt: new Date() } }
+        );
+      } catch (linkError) {
+        console.error(`[${requestId}] Error updating link status:`, linkError);
       }
     }
     
-    // Send immediate success response to client
-    res.status(200).json({ success: true });
+    // Send immediate success response to client to prevent timeouts
+    res.status(202).json({ 
+      success: true, 
+      requestId,
+      message: 'Report received and is being processed'
+    });
     
-    // Process the report in the background
+    // Process the report
+    console.log(`[${requestId}] Starting background processing`);
+    let processingResult;
+    
     if (req.file) {
-      processReportInBackground(
+      processingResult = await processReportInBackground(
         req.file, 
         latitude, 
         longitude,
@@ -481,41 +464,59 @@ app.post('/api/report', upload.single('image'), async (req, res) => {
         userId, 
         reportType,
         address
-      ).catch(err => console.error('Background processing error:', err));
+      );
     } else {
       // If no image, still create the report but without image
-      processReportWithoutImage(
+      processingResult = await processReportWithoutImage(
         latitude,
         longitude, 
         description,
         userId,
         reportType,
         address
-      ).catch(err => console.error('Background processing error (no image):', err));
+      );
     }
+    
+    console.log(`[${requestId}] Background processing completed with result:`, processingResult);
+    
   } catch (error) {
-    console.error('Error processing report:', error);
-    // Try to send error response if client is still connected
+    console.error(`[${requestId}] Error processing report:`, error);
+    
+    // Try to send error response if headers haven't been sent
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+    
+    // Try to notify the user of failure
     try {
-      res.status(500).json({ error: error.message });
-    } catch (responseError) {
-      console.error('Could not send error response:', responseError);
+      const { normalizeUserId } = require('./utils/userHelper');
+      const cleanUserId = normalizeUserId(req.body.userId);
+      
+      await sendWhatsAppMessage(
+        cleanUserId,
+        getText('REPORT_ERROR', 'en')
+      );
+    } catch (notifyError) {
+      console.error(`[${requestId}] Error notifying user of failure:`, notifyError);
     }
   }
 });
 
 // Function to process reports without images
+// Replace the existing processReportWithoutImage function
 async function processReportWithoutImage(latitude, longitude, description, userId, reportType, address) {
   try {
-    // Clean userId format
-    const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-    console.log(`Cleaned userId for processing without image: ${cleanUserId}`);
+    // Import normalized user ID function
+    const { normalizeUserId } = require('./utils/userHelper');
     
-    // Similar to processReportInBackground but without image upload
+    // Clean userId format consistently
+    const cleanUserId = normalizeUserId(userId);
+    console.log(`Processing report without image for user: ${cleanUserId}`);
+    
     const reportTypes = {
       '1': 'Traffic Violation',
       '2': 'Traffic Congestion',
-      '3': 'Irregularity', // Changed from 'Accident' to 'Irregularity'
+      '3': 'Irregularity',
       '4': 'Road Damage',
       '5': 'Illegal Parking',
       '6': 'Traffic Signal Issue',
@@ -533,15 +534,11 @@ async function processReportWithoutImage(latitude, longitude, description, userI
         divisionName = division.name;
       } else {
         // Location outside jurisdiction - inform user and stop
-        try {
-          await sendWhatsAppMessage(
-            cleanUserId,
-            getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
-          );
-        } catch (notifyError) {
-          console.error('Error notifying user about location outside jurisdiction:', notifyError);
-        }
-        return;
+        await sendWhatsAppMessage(
+          cleanUserId,
+          getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
+        );
+        return { success: false, error: 'Location outside jurisdiction' };
       }
     }
     
@@ -549,8 +546,9 @@ async function processReportWithoutImage(latitude, longitude, description, userI
     let userName = 'Anonymous';
     try {
       const userSession = await Session.findOne({ 
-        user_id: { $in: [userId, cleanUserId] } // Try both formats
+        user_id: { $regex: cleanUserId.replace('whatsapp:+', '') } 
       });
+      
       if (userSession && userSession.user_name) {
         userName = userSession.user_name;
       }
@@ -560,7 +558,7 @@ async function processReportWithoutImage(latitude, longitude, description, userI
     
     // Create new query document
     const newQuery = new Query({
-      user_id: cleanUserId, // Store the cleaned ID
+      user_id: cleanUserId,
       user_name: userName,
       query_type: queryTypeText,
       description,
@@ -580,43 +578,34 @@ async function processReportWithoutImage(latitude, longitude, description, userI
     await newQuery.save();
     console.log(`New ${queryTypeText} report (no image) saved with ID: ${newQuery._id}`);
     
+    // Send confirmation to user immediately
+    await sendWhatsAppMessage(
+      cleanUserId,
+      `Thank you! Your ${queryTypeText} report has been submitted successfully and assigned to the ${divisionName} division. You will be notified when there are updates.`
+    );
+    
     // Notify division officers if division was found
     if (division) {
-      try {
-        console.log(`Notifying officers of division: ${division.name}`);
-        const notifiedContacts = await notifyDivisionOfficers(newQuery, division);
-        
-        // Update query with notification status
-        if (notifiedContacts.length > 0) {
-          await Query.findByIdAndUpdate(newQuery._id, {
-            divisionNotified: true,
-            divisionOfficersNotified: notifiedContacts.map(phone => ({
-              phone,
-              timestamp: new Date()
-            }))
-          });
-          console.log(`Notification status updated for query ${newQuery._id}`);
-        }
-      } catch (notificationError) {
-        console.error('Error notifying division officers:', notificationError);
+      const notifiedContacts = await notifyDivisionOfficers(newQuery, division);
+      
+      // Update query with notification status
+      if (notifiedContacts.length > 0) {
+        await Query.findByIdAndUpdate(newQuery._id, {
+          divisionNotified: true,
+          divisionOfficersNotified: notifiedContacts
+        });
       }
     }
     
-    // Send confirmation to user
-    try {
-      await sendWhatsAppMessage(
-        cleanUserId,
-        `Thank you! Your ${queryTypeText} report has been submitted successfully and assigned to the ${divisionName} division. You will be notified when there are updates.`
-      );
-    } catch (notifyError) {
-      console.error('Error sending confirmation to user:', notifyError);
-    }
+    return { success: true, queryId: newQuery._id, division: divisionName };
   } catch (error) {
     console.error('Error processing report without image:', error);
     
     // Try to notify user of failure
     try {
-      const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
+      const { normalizeUserId } = require('./utils/userHelper');
+      const cleanUserId = normalizeUserId(userId);
+      
       await sendWhatsAppMessage(
         cleanUserId,
         getText('REPORT_ERROR', 'en')
@@ -624,6 +613,8 @@ async function processReportWithoutImage(latitude, longitude, description, userI
     } catch (notifyError) {
       console.error('Error notifying user of failure:', notifyError);
     }
+    
+    return { success: false, error: error.message };
   }
 }
 
@@ -631,31 +622,29 @@ async function processReportWithoutImage(latitude, longitude, description, userI
 // Updated background processing function
 // Find this function in server.js and replace it with this version
 
-// Replace the existing processReportInBackground function with this fixed version
+// Replace the existing processReportInBackground function with this version
 async function processReportInBackground(file, latitude, longitude, description, userId, reportType, address) {
   try {
     console.log(`Starting background processing for report from user ${userId}`);
+    // Import normalized user ID function
+    const { normalizeUserId } = require('./utils/userHelper');
     
-    // Parse userId to get the phone number without duplicated prefixes
-    const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-    console.log(`Cleaned userId for notifications: ${cleanUserId}`);
+    // Clean userId format consistently
+    const cleanUserId = normalizeUserId(userId);
+    console.log(`Normalized userId: ${cleanUserId}`);
     
     // Check if location is in a division
     console.log('Checking if location is within any division...');
     const matchingDivision = await findDivisionForLocation(latitude, longitude);
     
-    // If location is not in any division, inform the user and stop further processing
+    // If location is not in any division, inform the user and stop
     if (!matchingDivision) {
       console.log('Location is outside PCMC jurisdiction');
-      try {
-        await sendWhatsAppMessage(
-          cleanUserId,
-          getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
-        );
-      } catch (notifyError) {
-        console.error('Error notifying user about location outside jurisdiction:', notifyError);
-      }
-      return;
+      await sendWhatsAppMessage(
+        cleanUserId,
+        getText('LOCATION_OUTSIDE_JURISDICTION', 'en')
+      );
+      return { success: false, error: 'Location outside jurisdiction' };
     }
     
     // Upload image - now properly handling file object from multer
@@ -669,22 +658,12 @@ async function processReportInBackground(file, latitude, longitude, description,
       // Continue without image if upload fails
     }
     
-    // FIXED: Get user's session to retrieve their name
-    // The issue was in how we were looking up the session
+    // Get user's session to retrieve their name
     let userName = 'Anonymous';
     try {
-      // First try an exact match
-      const formattedUserId = `whatsapp:+${userId.replace(/^\+|whatsapp:[ ]*(\+?)/gi, '')}`;
-      console.log('Looking for session with user_id:', formattedUserId);
-      
-      let userSession = await Session.findOne({ user_id: formattedUserId });
-      
-      // If not found, try with just the number
-      if (!userSession) {
-        const phoneNumber = userId.replace(/^\+|whatsapp:[ ]*(\+?)/gi, '');
-        console.log('Looking for session with phone number in user_id:', phoneNumber);
-        userSession = await Session.findOne({ user_id: { $regex: phoneNumber } });
-      }
+      const userSession = await Session.findOne({ 
+        user_id: { $regex: cleanUserId.replace('whatsapp:+', '') } 
+      });
       
       if (userSession && userSession.user_name) {
         userName = userSession.user_name;
@@ -696,11 +675,10 @@ async function processReportInBackground(file, latitude, longitude, description,
       console.error('Error retrieving user name:', userError);
     }
     
-    // Get the query type text based on the report type number
     const reportTypes = {
       '1': 'Traffic Violation',
       '2': 'Traffic Congestion',
-      '3': 'Irregularity', // Changed from 'Accident' to 'Irregularity'
+      '3': 'Irregularity',
       '4': 'Road Damage',
       '5': 'Illegal Parking',
       '6': 'Traffic Signal Issue',
@@ -711,7 +689,7 @@ async function processReportInBackground(file, latitude, longitude, description,
     // Create query object with user name
     const query = new Query({
       user_id: cleanUserId,
-      user_name: userName, // Now this should have the correct name
+      user_name: userName,
       query_type: queryTypeText,
       description: description || 'No description provided',
       location: {
@@ -733,32 +711,35 @@ async function processReportInBackground(file, latitude, longitude, description,
     console.log(`Query saved with ID: ${query._id}`);
     
     // Send confirmation to user immediately after saving the query
-    const confirmationPromise = sendWhatsAppMessage(
+    await sendWhatsAppMessage(
       cleanUserId,
-      `Thank you! Your ${queryTypeText} report has been submitted successfully and assigned to the ${matchingDivision.name} division. You will be notified when there are updates. Feel free to send another message in case of more reports.`
+      `Thank you! Your ${queryTypeText} report has been submitted successfully and assigned to the ${matchingDivision.name} division. You will be notified when there are updates.`
     );
     
-    // Notify division officers in parallel
-    const notificationPromise = notifyDivisionOfficers(query, matchingDivision)
-      .then(notifiedContacts => {
-        console.log(`Notified ${notifiedContacts.length} division officers`);
-        return notifiedContacts;
-      })
-      .catch(error => {
-        console.error('Error notifying division officers:', error);
-        return [];
-      });
+    // Notify division officers
+    console.log(`Notifying officers of division: ${matchingDivision.name}`);
+    const notifiedContacts = await notifyDivisionOfficers(query, matchingDivision);
     
-    // Wait for both operations to complete
-    await Promise.all([confirmationPromise, notificationPromise]);
+    // Update query with notification status
+    if (notifiedContacts.length > 0) {
+      await Query.findByIdAndUpdate(query._id, {
+        divisionNotified: true,
+        divisionOfficersNotified: notifiedContacts
+      });
+      console.log(`Notification status updated for query ${query._id}`);
+    }
     
     console.log('Background processing completed successfully');
+    return { success: true, queryId: query._id, division: matchingDivision.name };
+    
   } catch (error) {
     console.error('Error in background processing:', error);
     
     // Notify user of failure
     try {
-      const cleanUserId = userId.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
+      const { normalizeUserId } = require('./utils/userHelper');
+      const cleanUserId = normalizeUserId(userId);
+      
       await sendWhatsAppMessage(
         cleanUserId,
         getText('REPORT_ERROR', 'en')
@@ -766,6 +747,8 @@ async function processReportInBackground(file, latitude, longitude, description,
     } catch (notifyError) {
       console.error('Error notifying user of failure:', notifyError);
     }
+    
+    return { success: false, error: error.message };
   }
 }
 

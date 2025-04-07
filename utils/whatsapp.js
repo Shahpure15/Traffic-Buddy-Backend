@@ -21,26 +21,38 @@ exports.getTwilioClient = () => client;
  */
 exports.sendWhatsAppMessage = async (to, body) => {
   try {
-    // Fix for duplicate whatsapp: prefix
-    let formattedTo = to.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
-    
-    // Ensure the 'to' number starts with 'whatsapp:+' and has no spaces
-    if (!formattedTo.startsWith('whatsapp:+')) {
-      // Remove any existing whatsapp: prefix
-      formattedTo = formattedTo.replace(/^whatsapp:[ ]*/i, '');
-      
-      // Remove any existing + sign
-      formattedTo = formattedTo.replace(/^\+/, '');
-      
-      // Add the correct prefix
-      formattedTo = `whatsapp:+${formattedTo}`;
+    if (!to) {
+      console.error('Invalid recipient phone number');
+      throw new Error('Invalid recipient');
     }
     
-    console.log(`Sending message to: ${formattedTo}`);
+    // Import the user ID normalization if available
+    let normalizedTo;
+    try {
+      const { normalizeUserId } = require('./userHelper');
+      normalizedTo = normalizeUserId(to);
+    } catch (e) {
+      // Fallback if import fails
+      normalizedTo = to.replace(/whatsapp:[ ]*(\+?)whatsapp:[ ]*(\+?)/i, 'whatsapp:+');
+      
+      // Ensure the 'to' number starts with 'whatsapp:+' and has no spaces
+      if (!normalizedTo.startsWith('whatsapp:+')) {
+        // Remove any existing whatsapp: prefix
+        normalizedTo = normalizedTo.replace(/^whatsapp:[ ]*/i, '');
+        
+        // Remove any existing + sign
+        normalizedTo = normalizedTo.replace(/^\+/, '');
+        
+        // Add the correct prefix
+        normalizedTo = `whatsapp:+${normalizedTo}`;
+      }
+    }
+    
+    console.log(`Sending message to: ${normalizedTo}`);
     
     const message = await client.messages.create({
       from: 'whatsapp:+918788649885', // Your Twilio WhatsApp number
-      to: formattedTo, // Fixed: Now ensures proper formatting
+      to: normalizedTo,
       body: body
     });
     
