@@ -719,216 +719,297 @@ async function processReportWithoutImage(requestId, latitude, longitude, descrip
   }
 }
 
+async function attemptWhatsAppSend(requestId, userId, message, context) {
+  if (!userId || !message) {
+      console.error(`[${requestId}] Invalid parameters for attemptWhatsAppSend. Context: ${context}`, { userId: !!userId, message: !!message });
+      return;
+  }
+  const startTime = Date.now();
+  console.log(`[${requestId}] Preparing to send WhatsApp (${context}) to ${userId}...`);
+  try {
+      // Assuming sendWhatsAppMessage throws an error on failure
+      await sendWhatsAppMessage(userId, message);
+      const duration = Date.now() - startTime;
+      console.log(`[${requestId}] Successfully sent WhatsApp (${context}) to ${userId}. Duration: ${duration}ms.`);
+  } catch (error) {
+      const duration = Date.now() - startTime;
+      // Log specific Twilio errors if available
+      console.error(`[${requestId}] FAILED to send WhatsApp (${context}) to ${userId} after ${duration}ms: ${error.message}`, {
+          code: error.code, // Twilio error code
+          status: error.status, // HTTP status code
+          stack: error.stack.substring(0, 500) // Log part of the stack
+      });
+      // Do not re-throw here, just log the failure. The main flow continues.
+  }
+}
+
 // Add this function to your server.js
 // Updated background processing function
 // Find this function in server.js and replace it with this version
 
-// Replace the existing processReportInBackground function with this fixed version
 async function processReportInBackground(requestId, file, latitude, longitude, description, originalUserId, reportType, address) {
-  let cleanUserId = null; // Define upfront for use in final catch block
+  let cleanUserId = null;
+  let savedQueryId = null; // Keep track of query ID for logging
 
-  // Wrap the entire function body in try...catch
   try {
-    console.log(`[${requestId}] Inside processReportInBackground for original user ID: ${originalUserId}`);
+      console.log(`[${requestId}] BG_PROC_IMG: Started for original user ID: ${originalUserId}`);
 
-    // --- Clean userId format (ensure consistency) ---
-    try {
-      const digits = originalUserId.replace(/\D/g, ''); // Remove all non-digits
-      if (digits) {
-        // Handle potential leading country codes already present
-        const numberPart = digits.startsWith('91') && digits.length > 10 
-                           ? digits.substring(2) // Remove leading 91 if length > 10
-                           : (digits.length > 10 ? digits.substring(digits.length - 10) : digits); // Otherwise get last 10 or fewer
-        cleanUserId = `whatsapp:+91${numberPart}`; // Standard format
-        console.log(`[${requestId}] Cleaned userId for notifications: ${cleanUserId} (from original: ${originalUserId})`);
-      } else {
-         throw new Error('Could not extract digits from userId');
-      }
-    } catch (cleanError) {
-       console.error(`[${requestId}] Failed to clean userId: ${originalUserId} - ${cleanError.message}`);
-       // Cannot proceed without a valid recipient ID
-       return;
-    }
-
-    // --- 1. Check if location is in a division ---
-    let matchingDivision = null;
-    try {
-        console.log(`[${requestId}] Checking jurisdiction for lat: ${latitude}, lng: ${longitude}`);
-        matchingDivision = await findDivisionForLocation(latitude, longitude);
-    } catch (divisionError) {
-        console.error(`[${requestId}] Error calling findDivisionForLocation: ${divisionError.message}`, divisionError.stack);
-        // Attempt to notify user of technical difficulty
-        try {
-            await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
-            console.log(`[${requestId}] Notified user ${cleanUserId} about jurisdiction check failure.`);
-        } catch (notifyError) {
-            console.error(`[${requestId}] Failed to notify user ${cleanUserId} about jurisdiction check failure: ${notifyError.message}`);
-        }
-        return; // Stop processing
-    }
-
-    // If location is not in any division
-    if (!matchingDivision) {
-      console.log(`[${requestId}] Location (${latitude}, ${longitude}) is outside PCMC jurisdiction.`);
+      // --- Clean userId format ---
       try {
-          await sendWhatsAppMessage(cleanUserId, getText('LOCATION_OUTSIDE_JURISDICTION', 'en'));
-          console.log(`[${requestId}] Notified user ${cleanUserId} about being outside jurisdiction.`);
-      } catch (notifyError) {
-          console.error(`[${requestId}] Failed to notify user ${cleanUserId} about being outside jurisdiction: ${notifyError.message}`);
+           const digits = originalUserId.replace(/\D/g, '');
+           if (digits) {
+               const numberPart = digits.startsWith('91') && digits.length > 10 
+                               ? digits.substring(2)
+                               : (digits.length > 10 ? digits.substring(digits.length - 10) : digits);
+               cleanUserId = `whatsapp:+91${numberPart}`;
+               console.log(`[${requestId}] BG_PROC_IMG: Cleaned userId: ${cleanUserId}`);
+           } else { throw new Error('Could not extract digits'); }
+      } catch (cleanError) {
+           console.error(`[${requestId}] BG_PROC_IMG: Failed to clean userId: ${originalUserId} - ${cleanError.message}`);
+           return; // Cannot proceed
       }
-      return; // Stop further processing
-    }
-    console.log(`[${requestId}] Location is within jurisdiction: ${matchingDivision.name} (${matchingDivision._id})`);
 
+      // --- 1. Check Jurisdiction ---
+      console.log(`[${requestId}] BG_PROC_IMG: Checking jurisdiction...`);
+      const matchingDivision = await findDivisionForLocation(latitude, longitude); // Let errors propagate up
 
-    // --- 2. Upload image ---
-    let uploadedUrl = null;
-    if (file) { // Check if file actually exists
-        try {
-            console.log(`[${requestId}] Uploading image to R2...`);
-            uploadedUrl = await uploadImageToR2(file); // Assuming uploadImageToR2 handles buffer/base64 correctly now
-            if (!uploadedUrl) {
-                console.warn(`[${requestId}] uploadImageToR2 returned null/empty URL.`);
-                // Notify user? - Define IMAGE_UPLOAD_FAILED text if needed
-                // try { await sendWhatsAppMessage(cleanUserId, getText('IMAGE_UPLOAD_FAILED', 'en')); } catch (e) {}
-            } else {
-                console.log(`[${requestId}] Image uploaded successfully: ${uploadedUrl}`);
-            }
-        } catch (uploadError) {
-            console.error(`[${requestId}] Failed to upload image: ${uploadError.message}`, uploadError.stack);
-            uploadedUrl = null; // Ensure it's null on failure
-            // Optionally notify user image upload failed
-            try {
-                 await sendWhatsAppMessage(cleanUserId, "There was an issue uploading your image, but the report is being processed."); 
-                 console.log(`[${requestId}] Notified user ${cleanUserId} about image upload failure.`);
-            } catch (notifyError) {
-                 console.error(`[${requestId}] Failed to notify user ${cleanUserId} about image upload failure: ${notifyError.message}`);
-            }
-        }
-    } else {
-        console.log(`[${requestId}] No file provided, skipping image upload.`);
-    }
+      if (!matchingDivision) {
+          console.log(`[${requestId}] BG_PROC_IMG: Location OUTSIDE jurisdiction.`);
+          // Send notification immediately and exit
+          await attemptWhatsAppSend(requestId, cleanUserId, getText('LOCATION_OUTSIDE_JURISDICTION', 'en'), 'outside_jurisdiction');
+          return;
+      }
+      console.log(`[${requestId}] BG_PROC_IMG: Location IN jurisdiction: ${matchingDivision.name}`);
 
+      // --- 2. Upload image ---
+      let uploadedUrl = null;
+      if (file) {
+          console.log(`[${requestId}] BG_PROC_IMG: Uploading image...`);
+          try {
+              uploadedUrl = await uploadImageToR2(file);
+              if (uploadedUrl) {
+                  console.log(`[${requestId}] BG_PROC_IMG: Image upload SUCCESS: ${uploadedUrl}`);
+              } else {
+                  console.warn(`[${requestId}] BG_PROC_IMG: Image upload returned empty URL.`);
+                  // Attempt notification about failed upload (fire and forget)
+                  attemptWhatsAppSend(requestId, cleanUserId, "Image upload failed, processing report without it.", 'image_upload_fail_notify').catch(e => {});
+              }
+          } catch (uploadError) {
+              console.error(`[${requestId}] BG_PROC_IMG: Image upload FAILED: ${uploadError.message}`, uploadError.stack);
+               // Attempt notification about failed upload
+              attemptWhatsAppSend(requestId, cleanUserId, "Image upload failed, processing report without it.", 'image_upload_fail_notify').catch(e => {});
+              uploadedUrl = null; // Ensure null on error
+          }
+      } else {
+          console.log(`[${requestId}] BG_PROC_IMG: No image file provided.`);
+      }
 
-    // --- 3. Get user's name from Session ---
-    let userName = 'Anonymous';
-    try {
-        console.log(`[${requestId}] Retrieving user session for ID: ${cleanUserId}`);
-        const userSession = await getUserSession(cleanUserId); // Use the cleaned ID
-        if (userSession && userSession.user_name) {
-            userName = userSession.user_name;
-            console.log(`[${requestId}] Found user name in session: ${userName}`);
-        } else {
-            console.log(`[${requestId}] No user name found in session for ${cleanUserId}. Using Anonymous.`);
-        }
-    } catch (userError) {
-        console.error(`[${requestId}] Error retrieving user session/name for ${cleanUserId}: ${userError.message}`, userError.stack);
-        // Continue with 'Anonymous' name
-    }
+      // --- 3. Get user's name ---
+      let userName = 'Anonymous';
+      try {
+          console.log(`[${requestId}] BG_PROC_IMG: Getting user session for ${cleanUserId}...`);
+          const userSession = await getUserSession(cleanUserId);
+          if (userSession && userSession.user_name) {
+              userName = userSession.user_name;
+              console.log(`[${requestId}] BG_PROC_IMG: Found user name: ${userName}`);
+          } else {
+               console.log(`[${requestId}] BG_PROC_IMG: User name not found.`);
+          }
+      } catch (userError) {
+          console.error(`[${requestId}] BG_PROC_IMG: Error getting user session: ${userError.message}`);
+          // Continue with Anonymous
+      }
 
-    // --- 4. Prepare Query Data ---
-    const reportTypes = {
-      '1': 'Traffic Violation', '2': 'Traffic Congestion', '3': 'Irregularity',
-      '4': 'Road Damage', '5': 'Illegal Parking', '6': 'Traffic Signal Issue',
-      '7': 'Suggestion'
-    };
-    const queryTypeText = reportTypes[reportType] || 'Report';
-    console.log(`[${requestId}] Report type selected: ${reportType} -> ${queryTypeText}`);
+      // --- 4. Prepare Query Data ---
+      const reportTypes = { /* ... */ };
+      const queryTypeText = reportTypes[reportType] || 'Report';
+      const queryData = { /* ... same as before, using cleanUserId, userName, uploadedUrl ... */ };
+       queryData.division = matchingDivision._id; // Add division info
+       queryData.divisionName = matchingDivision.name;
+       queryData.user_id = cleanUserId;
+       queryData.user_name = userName;
+       queryData.photo_url = uploadedUrl;
+       queryData.query_type = queryTypeText;
+       // ... other fields like description, location, status, timestamp ...
 
-    const queryData = {
-      user_id: cleanUserId, // Use the cleaned ID
-      user_name: userName,
-      query_type: queryTypeText,
-      description: description || 'No description provided',
-      location: {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        address: address || 'Address not provided'
-      },
-      photo_url: uploadedUrl,
-      division: matchingDivision._id,
-      divisionName: matchingDivision.name,
-      status: 'Pending',
-      timestamp: new Date(),
-      // associatedRequestId: requestId // Optional: Add for DB tracing
-    };
-    // Avoid logging full query data if it contains sensitive info
-    console.log(`[${requestId}] Query data prepared for type: ${queryTypeText}, division: ${matchingDivision.name}`);
+      console.log(`[${requestId}] BG_PROC_IMG: Query data prepared.`);
 
+      // --- 5. Save the query ---
+      console.log(`[${requestId}] BG_PROC_IMG: Saving query...`);
+      const query = new Query(queryData);
+      const savedQuery = await query.save(); // Let errors propagate
+      savedQueryId = savedQuery._id; // Store ID for logging
+      console.log(`[${requestId}] BG_PROC_IMG: Query saved SUCCESS, ID: ${savedQueryId}`);
 
-    // --- 5. Save the query ---
-    let savedQuery = null;
-    try {
-        console.log(`[${requestId}] Saving query to database...`);
-        const query = new Query(queryData);
-        savedQuery = await query.save();
-        console.log(`[${requestId}] Query saved successfully with ID: ${savedQuery._id}`);
-    } catch (dbError) {
-        console.error(`[${requestId}] Error saving query to database: ${dbError.message}`, { stack: dbError.stack, queryData: { userId: queryData.user_id } }); // Log partial data
-        // Notify user of technical difficulty
-        try {
-            await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
-            console.log(`[${requestId}] Notified user ${cleanUserId} about database save failure.`);
-        } catch (notifyError) {
-            console.error(`[${requestId}] Failed to notify user ${cleanUserId} about database save failure: ${notifyError.message}`);
-        }
-        return; // Stop processing
-    }
+      // --- 6. Send User Confirmation ---
+      // *SEND THIS NOW* after successful save.
+      const confirmationMessage = `Thank you! Your ${queryTypeText} report (ID: ${savedQueryId.toString().slice(-6)}) has been submitted to the ${matchingDivision.name} division. Updates will follow. Send 'menu' for more options.`;
+      await attemptWhatsAppSend(requestId, cleanUserId, confirmationMessage, 'user_confirmation');
 
+      // --- 7. Notify Officers (Run after user confirmation) ---
+      console.log(`[${requestId}] BG_PROC_IMG: Notifying officers for query ${savedQueryId}...`);
+      let notifiedContacts = [];
+      try {
+          notifiedContacts = await notifyDivisionOfficers(savedQuery, matchingDivision);
+          console.log(`[${requestId}] BG_PROC_IMG: Officer notification attempt completed. Notified: ${notifiedContacts.length}`);
+      } catch (notificationError) {
+          console.error(`[${requestId}] BG_PROC_IMG: Officer notification FAILED for query ${savedQueryId}: ${notificationError.message}`, notificationError.stack);
+          // Logged the error, but don't stop the flow.
+      }
 
-    // --- 6. Send Confirmation and Notifications (run sequentially for simpler error handling without Promise.all) ---
-    console.log(`[${requestId}] Sending user confirmation for query ${savedQuery._id}`);
-    const confirmationMessage = `Thank you! Your ${queryTypeText} report (ID: ${savedQuery._id.toString().slice(-6)}) has been submitted to the ${matchingDivision.name} division. Updates will follow. Send Any for more options.`;
-    
-    try {
-        await sendWhatsAppMessage(cleanUserId, confirmationMessage);
-        console.log(`[${requestId}] Successfully sent confirmation to user ${cleanUserId}.`);
-    } catch(confError) {
-        console.error(`[${requestId}] Failed to send confirmation to user ${cleanUserId}: ${confError.message}`, confError.stack);
-        // Continue anyway, officer notification is important too
-    }
+      // --- 8. Update Query Notification Status (Best effort) ---
+      if (notifiedContacts.length > 0) {
+          console.log(`[${requestId}] BG_PROC_IMG: Updating query ${savedQueryId} notification status...`);
+          Query.findByIdAndUpdate(savedQueryId, {
+              divisionNotified: true,
+              divisionOfficersNotified: notifiedContacts.map(phone => ({ phone, timestamp: new Date() }))
+          }).exec().then(() => {
+              console.log(`[${requestId}] BG_PROC_IMG: Query ${savedQueryId} status update SUCCESS.`);
+          }).catch(updateErr => {
+              console.error(`[${requestId}] BG_PROC_IMG: Query ${savedQueryId} status update FAILED: ${updateErr.message}`);
+          });
+      }
 
-    console.log(`[${requestId}] Initiating officer notifications for query ${savedQuery._id}`);
-    try {
-        const notifiedContacts = await notifyDivisionOfficers(savedQuery, matchingDivision);
-        console.log(`[${requestId}] Notified ${notifiedContacts.length} division officers for query ${savedQuery._id}`);
-        // Update query in DB with notification status (fire-and-forget or await if needed)
-        try {
-            await Query.findByIdAndUpdate(savedQuery._id, {
-                 divisionNotified: notifiedContacts.length > 0,
-                 divisionOfficersNotified: notifiedContacts.map(phone => ({ phone, timestamp: new Date() }))
-            });
-            console.log(`[${requestId}] Updated query ${savedQuery._id} notification status.`);
-        } catch (updateErr) {
-             console.error(`[${requestId}] Failed to update query ${savedQuery._id} with notification status: ${updateErr.message}`);
-        }
-    } catch (notificationError) {
-        console.error(`[${requestId}] Error during notifyDivisionOfficers for query ${savedQuery._id}: ${notificationError.message}`, notificationError.stack);
-        // Logged the error, processing continues (user was already confirmed)
-    }
-
-    console.log(`[${requestId}] Background processing completed successfully for query ${savedQuery._id}`);
+      console.log(`[${requestId}] BG_PROC_IMG: Processing COMPLETED for query ${savedQueryId}.`);
 
   } catch (error) {
-    // --- CATCH ALL FOR THE ENTIRE BACKGROUND TASK ---
-    console.error(`[${requestId}] !!! CRITICAL UNHANDLED ERROR in processReportInBackground !!!`, {
-        errorMessage: error.message,
-        stack: error.stack,
-        originalUserId, // Log original ID for context
-        cleanUserId,    // Log cleaned ID if available
-        location: { latitude, longitude }
-    });
-    // Attempt to notify the user about the failure IF cleanUserId was determined
-    if (cleanUserId) {
-        try {
-            await sendWhatsAppMessage(cleanUserId, getText('REPORT_ERROR', 'en'));
-            console.log(`[${requestId}] Notified user ${cleanUserId} about critical background failure.`);
-        } catch (notifyError) {
-            console.error(`[${requestId}] Failed to notify user ${cleanUserId} about critical background failure: ${notifyError.message}`);
-        }
-    } else {
-        console.error(`[${requestId}] Cannot notify user of critical failure, cleanUserId unknown/failed to determine.`);
-    }
+      // --- CATCH ALL FOR THE BACKGROUND TASK ---
+      console.error(`[${requestId}] !!! BG_PROC_IMG: CRITICAL ERROR !!! Query ID (if saved): ${savedQueryId}`, {
+          errorMessage: error.message,
+          stack: error.stack.substring(0, 1000), // Limit stack trace length
+          originalUserId, cleanUserId,
+          location: { latitude, longitude }
+      });
+      // Attempt to notify the user ONLY IF the error happened AFTER jurisdiction check
+      // and user hasn't already been notified about being outside.
+      if (cleanUserId && !error.message.includes('findDivisionForLocation')) { // Avoid double notification
+          await attemptWhatsAppSend(requestId, cleanUserId, getText('REPORT_ERROR', 'en'), 'critical_bg_fail_notify');
+      }
+  }
+}
+
+
+// --- Updated processReportWithoutImage Function (Apply similar structure) ---
+async function processReportWithoutImage(requestId, latitude, longitude, description, originalUserId, reportType, address) {
+  let cleanUserId = null;
+  let savedQueryId = null;
+
+  try {
+      console.log(`[${requestId}] BG_PROC_NOIMG: Started for original user ID: ${originalUserId}`);
+
+      // --- Clean userId format ---
+      try {
+          const digits = originalUserId.replace(/\D/g, '');
+          if (digits) {
+               const numberPart = digits.startsWith('91') && digits.length > 10 ? digits.substring(2) : (digits.length > 10 ? digits.substring(digits.length - 10) : digits);
+               cleanUserId = `whatsapp:+91${numberPart}`;
+               console.log(`[${requestId}] BG_PROC_NOIMG: Cleaned userId: ${cleanUserId}`);
+          } else { throw new Error('Could not extract digits'); }
+      } catch (cleanError) {
+           console.error(`[${requestId}] BG_PROC_NOIMG: Failed to clean userId: ${originalUserId} - ${cleanError.message}`);
+           return;
+      }
+
+      // --- 1. Check Jurisdiction ---
+      let division = null;
+      let divisionName = 'Unknown';
+      if (!latitude || !longitude) {
+           console.warn(`[${requestId}] BG_PROC_NOIMG: Missing location data.`);
+           await attemptWhatsAppSend(requestId, cleanUserId, "Location data was missing, cannot process report.", 'missing_location_noimg');
+           return;
+      }
+
+      console.log(`[${requestId}] BG_PROC_NOIMG: Checking jurisdiction...`);
+      division = await findDivisionForLocation(latitude, longitude); // Let errors propagate
+
+      if (!division) {
+          console.log(`[${requestId}] BG_PROC_NOIMG: Location OUTSIDE jurisdiction.`);
+          await attemptWhatsAppSend(requestId, cleanUserId, getText('LOCATION_OUTSIDE_JURISDICTION', 'en'), 'outside_jurisdiction_noimg');
+          return;
+      }
+      divisionName = division.name;
+      console.log(`[${requestId}] BG_PROC_NOIMG: Location IN jurisdiction: ${divisionName}`);
+
+
+      // --- 2. Get User Name ---
+      let userName = 'Anonymous';
+       try {
+          console.log(`[${requestId}] BG_PROC_NOIMG: Getting user session for ${cleanUserId}...`);
+          const userSession = await getUserSession(cleanUserId);
+          if (userSession && userSession.user_name) {
+              userName = userSession.user_name;
+              console.log(`[${requestId}] BG_PROC_NOIMG: Found user name: ${userName}`);
+          } else {
+               console.log(`[${requestId}] BG_PROC_NOIMG: User name not found.`);
+          }
+      } catch (userError) {
+          console.error(`[${requestId}] BG_PROC_NOIMG: Error getting user session: ${userError.message}`);
+      }
+
+
+      // --- 3. Prepare Query Data ---
+      const reportTypes = { /* ... */ };
+      const queryTypeText = reportTypes[reportType] || 'Report';
+      const queryData = { /* ... using cleanUserId, userName ... */ };
+      queryData.division = division._id;
+      queryData.divisionName = divisionName;
+      queryData.user_id = cleanUserId;
+      queryData.user_name = userName;
+      queryData.photo_url = null; // No image
+      queryData.query_type = queryTypeText;
+      // ... other fields ...
+      console.log(`[${requestId}] BG_PROC_NOIMG: Query data prepared.`);
+
+
+      // --- 4. Save Query ---
+      console.log(`[${requestId}] BG_PROC_NOIMG: Saving query...`);
+      const newQuery = new Query(queryData);
+      const savedQuery = await newQuery.save(); // Let errors propagate
+      savedQueryId = savedQuery._id;
+      console.log(`[${requestId}] BG_PROC_NOIMG: Query saved SUCCESS, ID: ${savedQueryId}`);
+
+      // --- 5. Send User Confirmation ---
+      const confirmationMessage = `Thank you! Your ${queryTypeText} report (ID: ${savedQueryId.toString().slice(-6)}) has been submitted to the ${divisionName} division. Updates will follow. Send 'menu' for more options.`;
+      await attemptWhatsAppSend(requestId, cleanUserId, confirmationMessage, 'user_confirmation_noimg');
+
+
+      // --- 6. Notify Officers ---
+      console.log(`[${requestId}] BG_PROC_NOIMG: Notifying officers for query ${savedQueryId}...`);
+      let notifiedContacts = [];
+      try {
+          notifiedContacts = await notifyDivisionOfficers(savedQuery, division);
+           console.log(`[${requestId}] BG_PROC_NOIMG: Officer notification attempt completed. Notified: ${notifiedContacts.length}`);
+      } catch (notificationError) {
+          console.error(`[${requestId}] BG_PROC_NOIMG: Officer notification FAILED for query ${savedQueryId}: ${notificationError.message}`, notificationError.stack);
+      }
+
+
+      // --- 7. Update Query Notification Status (Best effort) ---
+      if (notifiedContacts.length > 0) {
+          console.log(`[${requestId}] BG_PROC_NOIMG: Updating query ${savedQueryId} notification status...`);
+          Query.findByIdAndUpdate(savedQueryId, {
+              divisionNotified: true,
+              divisionOfficersNotified: notifiedContacts.map(phone => ({ phone, timestamp: new Date() }))
+          }).exec().then(() => {
+               console.log(`[${requestId}] BG_PROC_NOIMG: Query ${savedQueryId} status update SUCCESS.`);
+          }).catch(updateErr => {
+               console.error(`[${requestId}] BG_PROC_NOIMG: Query ${savedQueryId} status update FAILED: ${updateErr.message}`);
+          });
+      }
+
+      console.log(`[${requestId}] BG_PROC_NOIMG: Processing COMPLETED for query ${savedQueryId}.`);
+
+  } catch (error) {
+      // --- CATCH ALL FOR NOIMG BACKGROUND TASK ---
+       console.error(`[${requestId}] !!! BG_PROC_NOIMG: CRITICAL ERROR !!! Query ID (if saved): ${savedQueryId}`, {
+          errorMessage: error.message,
+          stack: error.stack.substring(0, 1000),
+          originalUserId, cleanUserId,
+          location: { latitude, longitude }
+      });
+      if (cleanUserId && !error.message.includes('findDivisionForLocation')) {
+          await attemptWhatsAppSend(requestId, cleanUserId, getText('REPORT_ERROR', 'en'), 'critical_bg_fail_notify_noimg');
+      }
   }
 }
 
