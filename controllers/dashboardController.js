@@ -323,3 +323,137 @@ exports.getDivisionPerformance = async (req, res) => {
     });
   }
 };
+
+
+exports.getAverageResolutionTimeByDivisionAndType = async (req, res) => {
+  try {
+    const { queryType, divisionId } = req.query;
+
+    // Base match stage: only consider resolved queries with valid timestamps and division
+    let matchStage = {
+      status: "Resolved",
+      resolved_at: { $ne: null },
+      timestamp: { $ne: null },
+      division: { $ne: null }, // Ensure division exists
+    };
+
+    // Add optional filters based on query parameters
+    if (queryType) {
+      matchStage.query_type = queryType;
+    }
+
+    if (divisionId) {
+      if (mongoose.Types.ObjectId.isValid(divisionId)) {
+        matchStage.division = new mongoose.Types.ObjectId(divisionId);
+      } else {
+        // Handle case where division code might be passed instead of ID
+        const divisionDoc = await Division.findOne({ code: divisionId });
+        if (divisionDoc) {
+          matchStage.division = divisionDoc._id;
+        } else {
+          // If division code is invalid, return empty results or an error
+          return res.status(400).json({
+            success: false,
+            message: `Invalid division identifier: ${divisionId}`,
+          });
+        }
+      }
+    }
+
+    const pipeline = [
+      // 1. Filter based on status, timestamps, division, and optional query params
+      { $match: matchStage },
+      // 2. Calculate resolution time in milliseconds
+      {
+        $addFields: {
+          resolutionTimeMillis: {
+            $subtract: ["$resolved_at", "$timestamp"],
+          },
+        },
+      },
+      // 3. Filter out any potential negative or zero resolution times (data sanity check)
+      {
+        $match: {
+          resolutionTimeMillis: { $gt: 0 },
+        },
+      },
+      // 4. Group by division and query type, calculate average resolution time and count
+      {
+        $group: {
+          _id: {
+            division: "$division",
+            queryType: "$query_type",
+          },
+          averageResolutionTimeMillis: {
+            $avg: "$resolutionTimeMillis",
+          },
+          count: { $sum: 1 },
+        },
+      },
+      // 5. Lookup division details
+      {
+        $lookup: {
+          from: "divisions", // The name of the divisions collection
+          localField: "_id.division",
+          foreignField: "_id",
+          as: "divisionInfo",
+        },
+      },
+      // 6. Unwind the divisionInfo array
+      {
+        $unwind: {
+          path: "$divisionInfo",
+          preserveNullAndEmptyArrays: true, // Keep results even if division lookup fails
+        },
+      },
+      // 7. Project the final shape and convert milliseconds to hours
+      {
+        $project: {
+          _id: 0, // Exclude the default _id
+          division: {
+            id: "$_id.division",
+            name: { $ifNull: ["$divisionInfo.name", "Unknown Division"] }, // Handle cases where division might be deleted
+            code: { $ifNull: ["$divisionInfo.code", "N/A"] },
+          },
+          queryType: "$_id.queryType",
+          averageResolutionTimeHours: {
+            $divide: ["$averageResolutionTimeMillis", 1000 * 60 * 60], // ms -> seconds -> minutes -> hours
+          },
+          resolvedQueryCount: "$count",
+        },
+      },
+      // 8. Sort for consistent ordering
+      {
+        $sort: {
+          "division.name": 1,
+          queryType: 1,
+        },
+      },
+    ];
+
+    const averageTimes = await Query.aggregate(pipeline);
+
+    // Format the average time to a fixed number of decimal places
+    const formattedAverageTimes = averageTimes.map((item) => ({
+      ...item,
+      averageResolutionTimeHours: parseFloat(
+        item.averageResolutionTimeHours.toFixed(2)
+      ),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: formattedAverageTimes,
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching average resolution time by division and type:",
+      error
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};

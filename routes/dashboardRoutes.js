@@ -21,4 +21,6 @@ router.get('/divisions', dashboardController.getAllDivisions);
 // Get division performance metrics (for main dashboard)
 router.get('/division-performance', dashboardController.getDivisionPerformance);
 
+router.get('/average-resolution-time', dashboardController.getAverageResolutionTimeByDivisionAndType);
+
 module.exports = router;
