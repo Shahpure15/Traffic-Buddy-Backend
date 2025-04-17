@@ -52,45 +52,45 @@ Play Store: ${PLAY_STORE_LINK}`;
  * @param {string} reportType - The type of report being created
  * @returns {string} The capture URL with query parameters
  */
-getCaptureUrl: async function(userId, reportType) {
-  try {
-    console.log('Creating capture URL for:', { userId, reportType });
-    
-    // Generate a unique linkId
-    const linkId = crypto.randomBytes(16).toString('hex');
-    console.log('Generated linkId:', linkId);
-    
-    // Clean userId consistently
-    const cleanUserId = userId.replace(/whatsapp:[ ]*/i, '').replace(/^\+/, '');
-    console.log('Cleaned userId for storage:', cleanUserId);
-    
-    // Store the link in database
-    const newLink = new ReportLink({
-      linkId,
-      userId: cleanUserId,
-      reportType,
-      createdAt: new Date()
-    });
-    
-    await newLink.save();
-    console.log('Saved link to database:', newLink);
-    
-    // Get the server URL from environment
-    const serverUrl = process.env.SERVER_URL || 'https://yourserver.com';
-    
-    // Use suggestion-capture.html for suggestion reports (type 7)
-    // and regular capture.html for all other types
-    const capturePageUrl = reportType === '7' 
-      ? `${serverUrl}/suggestion-capture.html` 
-      : `${serverUrl}/capture.html`;
-    
-    // Use the original userId in URL for consistency with WhatsApp
-    return `${capturePageUrl}?userId=${userId}&reportType=${reportType}&linkId=${linkId}`;
-  } catch (error) {
-    console.error('Error creating capture URL:', error);
-    throw error;
-  }
-},
+  getCaptureUrl: async function(userId, reportType) {
+    try {
+      console.log('Creating redirect link for:', { userId, reportType });
+      const crypto = require('crypto');
+      const ReportLink = require('../models/ReportLink'); // Ensure model is required
+  
+      // Generate a unique linkId
+      const linkId = crypto.randomBytes(16).toString('hex');
+      console.log('Generated linkId:', linkId);
+  
+      // Clean userId consistently
+      const cleanUserId = userId.replace(/whatsapp:[ ]*/i, '').replace(/^\+/, '');
+      console.log('Cleaned userId for storage:', cleanUserId);
+  
+      // Store the link in database
+      const newLink = new ReportLink({
+        linkId,
+        userId: cleanUserId, // Store the cleaned ID without prefix
+        reportType,
+        createdAt: new Date()
+      });
+  
+      await newLink.save();
+      console.log('Saved link to database:', newLink);
+  
+      // Get the server URL from environment
+      const serverUrl = process.env.SERVER_URL || 'https://yourserver.com';
+  
+      // Generate the short redirect URL pointing to the new /r/ endpoint
+      const redirectUrl = `${serverUrl}/r/${linkId}`;
+      console.log('Generated redirect URL:', redirectUrl);
+  
+      return redirectUrl; // Return the short URL
+  
+    } catch (error) {
+      console.error('Error creating capture URL:', error);
+      throw error;
+    }
+  },
 
   /**
    * Get optimized instruction message with clickable capture link

@@ -208,6 +208,64 @@ function isPointInPolygon(point, polygon) {
 
 // Initialize Express app
 const app = express();
+
+app.get('/r/:linkId', async (req, res) => {
+  const { linkId } = req.params;
+  console.log(`Redirect endpoint hit with linkId: ${linkId}`);
+
+  try {
+    // Find the link details in the database
+    const link = await ReportLink.findOne({ linkId });
+
+    if (!link) {
+      console.log(`Redirect failed: LinkId ${linkId} not found.`);
+      // Optional: Redirect to an error page or show a simple message
+      return res.status(404).send('Report link not found or invalid.');
+    }
+
+    // Check if link is expired (optional but good practice)
+    const now = new Date();
+    const linkCreatedAt = new Date(link.createdAt);
+    const diffHours = Math.abs(now - linkCreatedAt) / 36e5; // hours
+    if (diffHours > 24) {
+        console.log(`Redirect failed: LinkId ${linkId} expired.`);
+        // Mark as used to prevent future attempts? Or just show error.
+        // link.used = true; await link.save(); // Optional
+        return res.status(410).send('Report link has expired.');
+    }
+
+    // Check if link is already used (optional but good practice)
+    // Note: The capture page's validity check will also do this,
+    // but checking here prevents the redirect if already used.
+    if (link.used) {
+        console.log(`Redirect failed: LinkId ${linkId} already used.`);
+        return res.status(403).send('Report link has already been used.');
+    }
+
+
+    // Construct the original target URL
+    const serverUrl = process.env.SERVER_URL || 'https://yourserver.com'; // Ensure consistent base URL
+    const originalUserId = `whatsapp:+${link.userId}`; // Reconstruct the original userId format expected by capture.html
+    const reportType = link.reportType;
+
+    // Determine the correct capture page
+    const capturePage = reportType === '7' ? 'suggestion-capture.html' : 'capture.html';
+
+    // Build the full original URL with all parameters
+    const targetUrl = `${serverUrl}/${capturePage}?userId=${encodeURIComponent(originalUserId)}&reportType=${reportType}&linkId=${linkId}`;
+
+    console.log(`Redirecting linkId ${linkId} to: ${targetUrl}`);
+
+    // Perform the redirect
+    res.redirect(302, targetUrl); // 302 Found redirect
+
+  } catch (error) {
+    console.error(`Error handling redirect for linkId ${linkId}:`, error);
+    res.status(500).send('Error processing report link.');
+  }
+});
+
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(requestLogger);
