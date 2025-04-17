@@ -363,6 +363,7 @@ exports.deleteQuery = async (req, res) => {
 };
 
 // Send query information to department via email
+// In queryController.js, look for the notifyDepartmentByEmail function
 exports.notifyDepartmentByEmail = async (req, res) => {
   try {
     const { id } = req.params;
@@ -414,21 +415,24 @@ exports.notifyDepartmentByEmail = async (req, res) => {
       try {
         await sendQueryEmail(email, subject, query, departmentName);
         console.log(`Email sent to ${email}`);
-        EmailRecord.create({
+        
+        // FIX: Make sure to include all required fields including division
+        await EmailRecord.create({
           emails: email,
           subject: subject,
           queryId: query._id,
-          division: query.divisionName,
+          division: query.divisionName || "Unknown", // Make sure division is provided
           departmentName: departmentName,
           sentAt: new Date(),
           status: "sent",
         });
       } catch (emailError) {
-        EmailRecord.create({
+        // Also update this error case
+        await EmailRecord.create({
           emails: email,
           subject: subject,
           queryId: query._id,
-          division: query.divisionName,
+          division: query.divisionName || "Unknown", // Make sure division is provided
           departmentName: departmentName,
           sentAt: new Date(),
           status: "failed",
