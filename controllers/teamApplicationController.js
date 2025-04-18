@@ -141,35 +141,82 @@ exports.submitApplication = async (req, res) => {
 // Get all applications with pagination and filtering
 exports.getAllApplications = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, division } = req.query;
-    const skip = (page - 1) * limit;
+      let { page = 1, limit = 10, status, division, month, year } = req.query;
 
-    let filter = {};
-    if (status) filter.status = status;
-    if (division) filter.division = division;
+      // Convert page and limit to numbers, handle potential non-numeric values
+      page = parseInt(page, 10);
+      limit = parseInt(limit, 10);
+      if (isNaN(page) || page < 1) page = 1;
+      // Allow fetching all records if limit is -1 or non-positive (for download)
+      const fetchAll = limit <= 0;
+      if (isNaN(limit) || (limit <= 0 && !fetchAll)) limit = 10; // Default limit if invalid and not fetching all
 
-    const applications = await TeamApplication.find(filter)
-      .sort({ applied_at: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+      const skip = fetchAll ? 0 : (page - 1) * limit;
 
-    const total = await TeamApplication.countDocuments(filter);
-    
-    return res.status(200).json({
-      success: true,
-      count: applications.length,
-      total,
-      totalPages: Math.ceil(total / limit),
-      currentPage: parseInt(page),
-      data: applications
-    });
+      let filter = {};
+      if (status && ['Pending', 'Approved', 'Rejected'].includes(status)) {
+          filter.status = status;
+      }
+      if (division) {
+          // Assuming division is passed as code, find its ID
+          const divisionDoc = await Division.findOne({ code: division });
+          if (divisionDoc) {
+              filter.division = divisionDoc._id; // Filter by ObjectId if found
+          } else {
+              // Handle case where division code is invalid? Maybe return empty or ignore filter.
+              // For now, we'll effectively ignore the filter if the code is bad.
+              console.warn(`Invalid division code provided for filtering: ${division}`);
+          }
+      }
+
+      // Add month and year filtering based on 'applied_at'
+      if (month && year) {
+          const monthInt = parseInt(month, 10);
+          const yearInt = parseInt(year, 10);
+
+          if (!isNaN(monthInt) && !isNaN(yearInt) && monthInt >= 1 && monthInt <= 12) {
+              // Create date range for the selected month
+              const startDate = new Date(yearInt, monthInt - 1, 1); // Month is 0-indexed
+              const endDate = new Date(yearInt, monthInt, 0, 23, 59, 59, 999); // Last day of the month
+
+              filter.applied_at = {
+                  $gte: startDate,
+                  $lte: endDate,
+              };
+          } else {
+              console.warn(`Invalid month (${month}) or year (${year}) provided for filtering.`);
+          }
+      }
+
+
+      const query = TeamApplication.find(filter).sort({ applied_at: -1 });
+
+      let applications;
+      let total;
+
+      if (fetchAll) {
+          applications = await query;
+          total = applications.length; // Total is just the count of fetched items
+      } else {
+          applications = await query.skip(skip).limit(limit);
+          total = await TeamApplication.countDocuments(filter); // Count matching documents for pagination
+      }
+
+      return res.status(200).json({
+          success: true,
+          count: applications.length,
+          total,
+          totalPages: fetchAll ? 1 : Math.ceil(total / limit),
+          currentPage: fetchAll ? 1 : page,
+          data: applications
+      });
   } catch (error) {
-    console.error('Error fetching applications:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: error.message
-    });
+      console.error('Error fetching applications:', error);
+      return res.status(500).json({
+          success: false,
+          message: 'Internal server error',
+          error: error.message
+      });
   }
 };
 
