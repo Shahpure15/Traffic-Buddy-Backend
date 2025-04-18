@@ -157,8 +157,12 @@ exports.getAllApplications = async (req, res) => {
       const skip = fetchAll ? 0 : (page - 1) * limit;
 
       let filter = {};
-      if (status && ['Pending', 'Approved', 'Rejected'].includes(status)) {
-          filter.status = status;
+      if (status) {
+          // Make status check case-insensitive by capitalizing first letter
+          const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+          if (['Pending', 'Approved', 'Rejected'].includes(normalizedStatus)) {
+              filter.status = normalizedStatus;
+          }
       }
       if (division) {
           // Assuming division is passed as code, find its ID
