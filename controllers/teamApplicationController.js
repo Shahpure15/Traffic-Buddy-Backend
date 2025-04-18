@@ -3,6 +3,9 @@ const Session = require('../models/Session');
 const { uploadImageToR2 } = require('../utils/imageupload');
 const { sendWhatsAppMessage } = require('../utils/whatsapp');
 const { getText } = require('../utils/language');
+const { Division } = require('../models/Division'); 
+const mongoose = require('mongoose'); 
+
 
 // Create a new application session
 exports.createApplicationSession = async (req, res) => {
