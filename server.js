@@ -223,14 +223,13 @@ app.get('/r/:linkId', async (req, res) => {
       return res.status(404).send('Report link not found or invalid.');
     }
 
-    // Check if link is expired (optional but good practice)
+    // Check if link is expired (links valid for 5 minutes)
     const now = new Date();
     const linkCreatedAt = new Date(link.createdAt);
-    const diffHours = Math.abs(now - linkCreatedAt) / 36e5; // hours
-    if (diffHours > 24) {
+    const diffMinutes = Math.abs(now - linkCreatedAt) / 60000; 
+    
+    if (diffMinutes > 5) {
         console.log(`Redirect failed: LinkId ${linkId} expired.`);
-        // Mark as used to prevent future attempts? Or just show error.
-        // link.used = true; await link.save(); // Optional
         return res.status(410).send('Report link has expired.');
     }
 
@@ -854,12 +853,11 @@ app.get('/api/check-link-validity', async (req, res) => {
       });
     }
     
-    // Fix the userId cleanup to handle multiple formats
-    // This handles: "whatsapp:+123456", "whatsapp: +123456", "whatsapp:123456", "+123456", "123456"
+    // Clean the userId for consistent lookup
     const cleanUserId = userId.replace(/whatsapp:[ ]*/i, '').replace(/^\+/, '');
     console.log('Cleaned userId for lookup:', cleanUserId);
     
-    // Find link in database - LOOK FOR RECORDS WITH AND WITHOUT + PREFIX
+    // Find link in database
     const link = await ReportLink.findOne({
       linkId,
       $or: [
@@ -887,12 +885,12 @@ app.get('/api/check-link-validity', async (req, res) => {
       });
     }
     
-    // Check if link is expired (links valid for 24 hours)
+    // Check if link is expired (links valid for 5 minutes)
     const now = new Date();
     const linkCreatedAt = new Date(link.createdAt);
-    const diffHours = Math.abs(now - linkCreatedAt) / 36e5; // hours
+    const diffMinutes = Math.abs(now - linkCreatedAt) / 60000; // milliseconds to minutes
     
-    if (diffHours > 24) {
+    if (diffMinutes > 5) {
       return res.status(403).json({ 
         valid: false, 
         message: 'This reporting link has expired'

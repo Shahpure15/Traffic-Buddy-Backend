@@ -21,7 +21,7 @@ const reportLinkSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    expires: 86400 // TTL index: auto-delete after 24 hours
+    expires: 300 // TTL index: auto-delete after 24 hours
   },
   usedAt: {
     type: Date
