@@ -7,6 +7,8 @@ const Session = require("../models/Session");
 const { sendQueryEmail } = require("../utils/email");
 const mongoose = require("mongoose");
 const EmailRecord = require("../models/EmailRecords");
+const ExcelJS = require('exceljs'); // Import exceljs
+
 
 // Get all queries (with pagination and filtering)
 exports.getAllQueries = async (req, res) => {
@@ -675,25 +677,78 @@ exports.broadcastMessageByOptions = async (req, res) => {
 exports.getEmailRecords = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
-
     const skip = (page - 1) * limit;
 
-    const emailRecords = await EmailRecord.find()
-      .sort({ sentAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate("departmentName", "name code")
-      .exec();
+    // Aggregation pipeline to group by queryId and departmentName
+    const aggregationPipeline = [
+      {
+        $sort: { sentAt: 1 }, // Sort to reliably get the first sent time and status
+      },
+      {
+        $group: {
+          _id: {
+            queryId: "$queryId",
+            departmentName: "$departmentName",
+          },
+          emails: { $push: "$emails" }, // Collect all emails for the group
+          subject: { $first: "$subject" }, // Take details from the first record
+          division: { $first: "$division" },
+          status: { $first: "$status" }, // Represents status of the first attempt
+          sentAt: { $first: "$sentAt" }, // Timestamp of the first email sent to this dept for this query
+          queryObjectId: { $first: "$queryId" }, // Keep queryId for population
+        },
+      },
+       {
+        $lookup: { // Populate query details to get query_type
+          from: 'queries', // Ensure this is the correct collection name for queries
+          localField: 'queryObjectId',
+          foreignField: '_id',
+          as: 'queryInfo'
+        }
+      },
+      {
+        $unwind: { // Unwind the queryInfo array
+          path: "$queryInfo",
+          preserveNullAndEmptyArrays: true // Keep records even if query is deleted/not found
+        }
+      },
+      {
+        $project: { // Reshape the output
+          _id: 0, // Exclude the default group _id
+          queryId: "$_id.queryId",
+          departmentName: "$_id.departmentName",
+          emails: 1, // The array of emails sent
+          subject: 1,
+          division: 1,
+          status: 1,
+          sentAt: 1,
+          queryType: "$queryInfo.query_type", // Add query type
+        },
+      },
+      {
+        $sort: { sentAt: -1 }, // Sort the final grouped results by the first sent time
+      },
+      {
+        $facet: { // Use $facet for pagination on aggregated results
+          metadata: [{ $count: "total" }],
+          data: [{ $skip: skip }, { $limit: parseInt(limit) }],
+        },
+      },
+    ];
 
-    const totalRecords = await EmailRecord.countDocuments();
+    const results = await EmailRecord.aggregate(aggregationPipeline);
+
+    const emailRecords = results[0].data;
+    const totalRecords = results[0].metadata.length > 0 ? results[0].metadata[0].total : 0;
+    const totalPages = Math.ceil(totalRecords / limit);
 
     return res.status(200).json({
       success: true,
-      count: emailRecords.length,
-      total: totalRecords,
-      totalPages: Math.ceil(totalRecords / limit),
+      count: emailRecords.length, // Count of groups on the current page
+      total: totalRecords, // Total number of groups
+      totalPages: totalPages,
       currentPage: parseInt(page),
-      data: emailRecords,
+      data: emailRecords, // Send the grouped data
     });
   } catch (error) {
     console.error("Error fetching email records:", error);
@@ -702,6 +757,121 @@ exports.getEmailRecords = async (req, res) => {
       message: "Internal server error",
       error: error.message,
     });
+  }
+};
+
+exports.exportEmailRecords = async (req, res) => {
+  try {
+    const { year, month } = req.query; // Expect year and month (1-12)
+
+    if (!year || !month) {
+      return res.status(400).json({ success: false, message: 'Year and month parameters are required.' });
+    }
+
+    // Validate year and month
+    const yearNum = parseInt(year);
+    const monthNum = parseInt(month);
+    if (isNaN(yearNum) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+        return res.status(400).json({ success: false, message: 'Invalid year or month.' });
+    }
+
+    // Calculate start and end dates for the given month in UTC
+    const startDate = new Date(Date.UTC(yearNum, monthNum - 1, 1, 0, 0, 0, 0)); // Month is 0-indexed in JS Date
+    const endDate = new Date(Date.UTC(yearNum, monthNum, 1, 0, 0, 0, 0)); // Start of the next month
+    endDate.setMilliseconds(endDate.getMilliseconds() - 1); // End of the specified month
+
+    console.log(`Exporting email records from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+
+    // Fetch RAW email records for the specified month/year
+    const records = await EmailRecord.find({
+      sentAt: { $gte: startDate, $lte: endDate },
+    })
+    .sort({ sentAt: -1 }) // Sort by date descending
+    .populate({ // Populate query details
+        path: 'queryId',
+        select: 'query_type timestamp user_name location.address' // Select desired fields from Query model
+    })
+    .lean(); // Use lean() for better performance with large datasets
+
+    if (!records || records.length === 0) {
+        // Send a 404 status but allow frontend to handle message
+        return res.status(404).send('No email records found for the selected month.');
+    }
+
+    // Create Excel workbook and worksheet
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(`Email Records ${yearNum}-${monthNum.toString().padStart(2, '0')}`);
+
+    // Define columns for the Excel sheet
+    worksheet.columns = [
+      { header: 'Sr. No.', key: 'srNo', width: 8 },
+      { header: 'Department Name', key: 'departmentName', width: 25 },
+      { header: 'Recipient Email', key: 'email', width: 30 },
+      { header: 'Subject', key: 'subject', width: 45 },
+      { header: 'Query Type', key: 'queryType', width: 20 },
+      { header: 'Query ID', key: 'queryIdStr', width: 28 },
+      { header: 'Division', key: 'division', width: 18 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Sent At', key: 'sentAt', width: 20, style: { numFmt: 'yyyy-mm-dd hh:mm:ss' } },
+      { header: 'Query Timestamp', key: 'queryTimestamp', width: 20, style: { numFmt: 'yyyy-mm-dd hh:mm:ss' } },
+      { header: 'Query User', key: 'queryUser', width: 25 },
+      { header: 'Query Location', key: 'queryLocation', width: 40 },
+    ];
+
+    // Add rows to the worksheet
+    records.forEach((record, index) => {
+      worksheet.addRow({
+        srNo: index + 1,
+        departmentName: record.departmentName || 'N/A',
+        email: record.emails, // This is the single email from the raw record
+        subject: record.subject || 'N/A',
+        queryType: record.queryId?.query_type || 'N/A',
+        queryIdStr: record.queryId?._id.toString() || 'N/A', // Convert ObjectId to string
+        division: record.division || 'N/A',
+        status: record.status || 'N/A',
+        sentAt: record.sentAt ? new Date(record.sentAt) : null, // Ensure it's a Date object for formatting
+        queryTimestamp: record.queryId?.timestamp ? new Date(record.queryId.timestamp) : null,
+        queryUser: record.queryId?.user_name || 'N/A',
+        queryLocation: record.queryId?.location?.address || 'N/A',
+      });
+    });
+
+    // Style the header row
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+    worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern:'solid',
+        fgColor:{argb:'FFD3D3D3'} // Light grey background
+    };
+    worksheet.getRow(1).border = {
+        bottom: { style: 'thin' }
+    };
+
+    // Set response headers for Excel download
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="email_records_${yearNum}_${monthNum.toString().padStart(2, '0')}.xlsx"`
+    );
+
+    // Write workbook to response stream and end response
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (error) {
+    console.error('Error exporting email records:', error);
+     // Check if headers have already been sent before sending JSON error
+     if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Internal server error during export.' });
+     } else {
+        // If headers are sent, we can't send JSON, just end the response or log
+        console.error("Headers already sent, could not send JSON error response.");
+        res.end();
+     }
   }
 };
 
