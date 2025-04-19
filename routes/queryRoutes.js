@@ -39,7 +39,6 @@ router.delete("/:id", mainAdminOnly, queryController.deleteQuery);
 
 router.post("/:id/notify-department", queryController.notifyDepartmentByEmail);
 
-
 // Broadcast features should be restricted to main admin
 router.post("/broadcast", mainAdminOnly, queryController.broadcastMessage);
 router.post(
@@ -54,8 +53,6 @@ router.post(
 );
 
 router.get("/email-records", queryController.getEmailRecords);
-
-router.get("email-records/export", queryController.exportEmailRecords);
 
 // Test WhatsApp messaging (restrict to main admin)
 router.post("/test-notification", mainAdminOnly, async (req, res) => {
