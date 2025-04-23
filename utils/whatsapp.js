@@ -118,13 +118,10 @@ exports.notifyDivisionOfficers = async (query, division) => {
     `Reported by: ${reporterName}\n\n` +
     `To resolve this issue, click: ${process.env.SERVER_URL}/resolve.html?id=${query._id}`;
   
-  // Track messages sent
-  const messagePromises = [];
-  
   // Send to each officer
   for (const officer of activeOfficers) {
     try {
-      // Try primary phone
+      // Send to primary phone if available
       if (officer.phone) {
         const formattedPhone = formatPhoneNumber(officer.phone);
         
@@ -133,7 +130,7 @@ exports.notifyDivisionOfficers = async (query, division) => {
             from: 'whatsapp:+918788649885',
             to: formattedPhone,
             body: notificationMessage,
-            statusCallback: `${process.env.SERVER_URL}/webhook/message-status` // Add status callback
+            statusCallback: `${process.env.SERVER_URL}/webhook/message-status`
           });
           
           console.log(`Notification sent to ${officer.name} (${formattedPhone}) with SID: ${message.sid}`);
@@ -143,18 +140,15 @@ exports.notifyDivisionOfficers = async (query, division) => {
             name: officer.name || 'Unknown',
             phone: formattedPhone,
             notification_time: new Date(),
-            status: 'queued', // Initial status
+            status: 'queued',
             message_sid: message.sid
           });
-          
-          // Don't wait for backup notification if primary succeeded
-          continue;
         } catch (primaryError) {
           console.error(`Error sending to primary number for ${officer.name}:`, primaryError);
         }
       }
       
-      // Try alternate phone if primary failed or doesn't exist
+      // Always try alternate phone if it exists and is different from primary
       if (officer.alternate_phone && officer.alternate_phone !== officer.phone) {
         const formattedAlternatePhone = formatPhoneNumber(officer.alternate_phone);
         
@@ -163,17 +157,17 @@ exports.notifyDivisionOfficers = async (query, division) => {
             from: 'whatsapp:+918788649885',
             to: formattedAlternatePhone,
             body: notificationMessage,
-            statusCallback: `${process.env.SERVER_URL}/webhook/message-status` // Add status callback
+            statusCallback: `${process.env.SERVER_URL}/webhook/message-status`
           });
           
-          console.log(`Alternate notification sent to ${officer.name} (${formattedAlternatePhone}) with SID: ${message.sid}`);
+          console.log(`Notification sent to alternate number for ${officer.name} (${formattedAlternatePhone}) with SID: ${message.sid}`);
           
           notifiedContacts.push({
             officer_id: officer._id || 'unknown',
             name: officer.name || 'Unknown',
             phone: formattedAlternatePhone,
             notification_time: new Date(),
-            status: 'queued', // Initial status
+            status: 'queued',
             message_sid: message.sid
           });
         } catch (alternateError) {
