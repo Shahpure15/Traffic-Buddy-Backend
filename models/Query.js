@@ -20,6 +20,11 @@ const querySchema = new mongoose.Schema({
   resolution_note: String,
   resolved_at: Date,
   resolution_image_url: String, // New field for resolution proof images
+  resolved_by: {
+    name: String,
+    timestamp: Date,
+    ip_address: String
+  }, // New field to track who resolved the query
   division: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Division' 

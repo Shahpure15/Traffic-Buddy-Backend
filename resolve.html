@@ -99,6 +99,12 @@
                     <option value="Rejected">Rejected</option>
                 </select>
                 
+                <!-- Add the resolver name field that appears when needed -->
+                <div id="resolverNameContainer" style="display: none;">
+                    <h3>Your Name</h3>
+                    <input type="text" id="resolverName" placeholder="Enter your name (required)" required />
+                </div>
+                
                 <h3>Resolution Notes</h3>
                 <textarea id="resolutionNotes" rows="4" placeholder="Provide details about how this issue was resolved or why it was rejected..."></textarea>
                 
@@ -107,7 +113,7 @@
                 <img id="resolvedImage" class="resolved-image" alt="Resolution Image" src="#" />
                 
                 <button id="submitBtn">Update Report</button>
-                <div id="submitLoader" class="loader"></div>
+                <div id="submitLoader" class="loader">
             </div>
         </div>
     </div>
@@ -137,6 +143,8 @@
         const submitBtnEl = document.getElementById('submitBtn');
         const submitLoaderEl = document.getElementById('submitLoader');
         const statusBannerEl = document.getElementById('statusBanner');
+        const resolverNameContainer = document.getElementById('resolverNameContainer');
+        const resolverNameInput = document.getElementById('resolverName');
         
         // Handle image upload button click
         uploadImageBtnEl.addEventListener('click', () => {
@@ -267,76 +275,96 @@
         
         // Submit resolution
         async function submitResolution() {
-            const status = statusDropdownEl.value;
-            const resolutionNote = resolutionNotesEl.value;
-            
-            // Validate inputs
-            if (status === 'Resolved' && !resolutionNote) {
-                alert('Please provide resolution notes.');
-                return;
-            }
-            
-            if (status === 'Rejected' && !resolutionNote) {
-                alert('Please provide rejection reason.');
-                return;
-            }
-            
-            submitBtnEl.disabled = true;
-            submitLoaderEl.style.display = 'block';
-            
-            try {
-                // Prepare form data for file upload
-                const formData = new FormData();
-                formData.append('status', status);
-                formData.append('resolution_note', resolutionNote);
-                
-                if (fileInputEl.files && fileInputEl.files[0]) {
-                    formData.append('image', fileInputEl.files[0]);
-                }
-                
-                const response = await fetch(`/api/reports/${reportId}/resolve`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || 'Failed to update report');
-                }
-                
-                const data = await response.json();
-                
-                alert('Report updated successfully!');
-                
-                // Update UI
-                updateStatusBanner(status);
-                
-                // Disable form if resolved or rejected
-                if (status === 'Resolved' || status === 'Rejected') {
-                    statusDropdownEl.disabled = true;
-                    resolutionNotesEl.disabled = true;
-                    uploadImageBtnEl.disabled = true;
-                    submitBtnEl.disabled = true;
-                } else {
-                    submitBtnEl.disabled = false;
-                }
-                
-            } catch (error) {
-                alert(`Error: ${error.message}`);
-                submitBtnEl.disabled = false;
-            } finally {
-                submitLoaderEl.style.display = 'none';
-            }
+        const status = statusDropdownEl.value;
+        const resolutionNote = resolutionNotesEl.value;
+        
+        // Validate inputs
+        if (status === 'Resolved' && !resolutionNote) {
+            alert('Please provide resolution notes.');
+            return;
         }
+        
+        if (status === 'Rejected' && !resolutionNote) {
+            alert('Please provide rejection reason.');
+            return;
+        }
+        
+        // Validate resolver name for resolved or rejected status
+        if ((status === 'Resolved' || status === 'Rejected') && !resolverNameInput.value.trim()) {
+            alert('Please provide your name.');
+            resolverNameInput.focus();
+            return;
+        }
+        
+        submitBtnEl.disabled = true;
+        submitLoaderEl.style.display = 'block';
+        
+        try {
+            // Prepare form data for file upload
+            const formData = new FormData();
+            formData.append('status', status);
+            formData.append('resolution_note', resolutionNote);
+            
+            // Add resolver name to the form data
+            if (status === 'Resolved' || status === 'Rejected') {
+                formData.append('resolver_name', resolverNameInput.value.trim());
+            }
+            
+            if (fileInputEl.files && fileInputEl.files[0]) {
+                formData.append('image', fileInputEl.files[0]);
+            }
+            
+            const response = await fetch(`/api/reports/${reportId}/resolve`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to update report');
+            }
+            
+            const data = await response.json();
+            
+            alert('Report updated successfully!');
+            
+            // Update UI
+            updateStatusBanner(status);
+            
+            // Disable form if resolved or rejected
+            if (status === 'Resolved' || status === 'Rejected') {
+                statusDropdownEl.disabled = true;
+                resolutionNotesEl.disabled = true;
+                resolverNameInput.disabled = true;
+                uploadImageBtnEl.disabled = true;
+                submitBtnEl.disabled = true;
+            } else {
+                submitBtnEl.disabled = false;
+            }
+            
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+            submitBtnEl.disabled = false;
+        } finally {
+            submitLoaderEl.style.display = 'none';
+        }
+    }
         
         // Add event listener for submit button
         submitBtnEl.addEventListener('click', submitResolution);
         
         // Add event listener for status dropdown
         statusDropdownEl.addEventListener('change', () => {
-            const status = statusDropdownEl.value;
-            updateStatusBanner(status);
-        });
+        const status = statusDropdownEl.value;
+        updateStatusBanner(status);
+        
+        // Show resolver name field for Resolved or Rejected status
+        if (status === 'Resolved' || status === 'Rejected') {
+            resolverNameContainer.style.display = 'block';
+        } else {
+            resolverNameContainer.style.display = 'none';
+        }
+    });
         
         // Load report data when page loads
         document.addEventListener('DOMContentLoaded', fetchReportData);

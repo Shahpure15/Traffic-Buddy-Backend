@@ -187,12 +187,20 @@ exports.getQueryById = async (req, res) => {
 exports.updateQueryStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, resolution_note } = req.body;
+    const { status, resolution_note, resolver_name } = req.body;
 
     if (!["Pending", "In Progress", "Resolved", "Rejected"].includes(status)) {
       return res.status(400).json({
         success: false,
         message: "Invalid status value",
+      });
+    }
+
+    // If status is 'Resolved' or 'Rejected', resolver name is required
+    if ((status === "Resolved" || status === "Rejected") && !resolver_name) {
+      return res.status(400).json({
+        success: false,
+        message: "Resolver name is required for resolving or rejecting a query",
       });
     }
 
@@ -212,9 +220,21 @@ exports.updateQueryStatus = async (req, res) => {
       query.resolution_note = resolution_note;
     }
 
-    // If status is being changed to Resolved, add resolution timestamp
-    if (status === "Resolved") {
+    // If status is being changed to Resolved or Rejected, add resolution details
+    if (status === "Resolved" || status === "Rejected") {
       query.resolved_at = new Date();
+      
+      // Get client IP address (if available)
+      const ipAddress = req.headers['x-forwarded-for'] || 
+                         req.connection.remoteAddress || 
+                         'Unknown';
+      
+      // Save resolver information
+      query.resolved_by = {
+        name: resolver_name,
+        timestamp: new Date(),
+        ip_address: ipAddress
+      };
     }
 
     await query.save();
@@ -241,18 +261,21 @@ exports.updateQueryStatus = async (req, res) => {
             queryTypeForMessage.toLowerCase()
           );
         } else if (status === "Resolved") {
-          // Replace placeholders with actual values
+          // Replace placeholders with actual values and include resolver name
           statusMessage = getText("STATUS_RESOLVED", userLanguage)
             .replace("{0}", queryTypeForMessage.toLowerCase())
             .replace(
               "{1}",
-              resolution_note || "No additional details provided."
+              `${resolution_note || "No additional details provided."} (Resolved by: ${resolver_name})`
             );
         } else if (status === "Rejected") {
-          // Replace placeholders with actual values
+          // Replace placeholders with actual values and include resolver name
           statusMessage = getText("STATUS_REJECTED", userLanguage)
             .replace("{0}", queryTypeForMessage.toLowerCase())
-            .replace("{1}", resolution_note || "No reason specified.");
+            .replace(
+              "{1}", 
+              `${resolution_note || "No reason specified."} (Rejected by: ${resolver_name})`
+            );
         }
 
         if (statusMessage) {
