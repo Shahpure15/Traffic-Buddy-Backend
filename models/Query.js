@@ -31,7 +31,19 @@ const querySchema = new mongoose.Schema({
   },
   divisionName: String, // For quick reference without joins
   divisionNotified: { type: Boolean, default: false },
-  divisionOfficersNotified: [{ phone: String, timestamp: Date }]
+  divisionOfficersNotified: [{
+    officer_id: String,
+    name: String,
+    phone: String,
+    notification_time: Date,
+    status: {
+      type: String,
+      enum: ['queued', 'sent', 'delivered', 'read', 'failed', 'undelivered'],
+      default: 'queued'
+    },
+    status_updated_at: Date,
+    message_sid: String
+  }],
 });
 
 module.exports = mongoose.model('Query', querySchema);

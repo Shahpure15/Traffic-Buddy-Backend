@@ -1553,6 +1553,33 @@ app.post('/api/suggestion', express.urlencoded({ extended: true }), async (req, 
   }
 });
 
+app.post('/webhook/message-status', express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const messageSid = req.body.MessageSid;
+    const messageStatus = req.body.MessageStatus;
+    
+    console.log(`Message ${messageSid} status: ${messageStatus}`);
+    
+    // Update message status in database
+    if (messageSid) {
+      await Query.updateOne(
+        { 'divisionOfficersNotified.message_sid': messageSid },
+        { 
+          $set: { 
+            'divisionOfficersNotified.$.status': messageStatus,
+            'divisionOfficersNotified.$.status_updated_at': new Date()
+          } 
+        }
+      );
+    }
+    
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('Error processing message status webhook:', error);
+    res.status(500).send('Error');
+  }
+});
+
 app.get('/resolve.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'resolve.html'));
 });
