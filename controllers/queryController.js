@@ -187,7 +187,19 @@ exports.getQueryById = async (req, res) => {
 exports.updateQueryStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, resolution_note, resolver_name } = req.body;
+    
+    // Extract data from request body, handling both JSON and FormData
+    const status = req.body.status;
+    const resolution_note = req.body.resolution_note;
+    const resolver_name = req.body.resolver_name;
+    
+    console.log("Update request received:", { 
+      id, 
+      status, 
+      hasNote: !!resolution_note, 
+      hasName: !!resolver_name,
+      contentType: req.headers['content-type']
+    });
 
     if (!["Pending", "In Progress", "Resolved", "Rejected"].includes(status)) {
       return res.status(400).json({
@@ -235,6 +247,17 @@ exports.updateQueryStatus = async (req, res) => {
         timestamp: new Date(),
         ip_address: ipAddress
       };
+      
+      // If an image was uploaded, handle it here
+      if (req.file) {
+        try {
+          const uploadedUrl = await uploadImageToR2(req.file);
+          query.resolution_image_url = uploadedUrl;
+        } catch (uploadError) {
+          console.error("Error uploading resolution image:", uploadError);
+          // Continue without the image if upload fails
+        }
+      }
     }
 
     await query.save();
