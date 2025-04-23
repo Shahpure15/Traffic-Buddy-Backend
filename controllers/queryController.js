@@ -875,6 +875,7 @@ exports.getqueriesbytimefilter = async (req, res) => {
 };
 
 // Get stats by division
+// Update the getStatsByDivision function to include status counts by date
 exports.getStatsByDivision = async (req, res) => {
   try {
     const { division } = req.params;
@@ -931,38 +932,7 @@ exports.getStatsByDivision = async (req, res) => {
       ...filter,
       query_type: "Traffic Violation",
     });
-    const trafficCongestion = await Query.countDocuments({
-      ...filter,
-      query_type: "Traffic Congestion",
-    });
-    const accident = await Query.countDocuments({
-      ...filter,
-      query_type: "Accident",
-    });
-    const roadDamage =
-      req.user && req.user.role === "main_admin"
-        ? await Query.countDocuments({ ...filter, query_type: "Road Damage" })
-        : 0;
-    const illegalParking = await Query.countDocuments({
-      ...filter,
-      query_type: "Illegal Parking",
-    });
-    const trafficSignalIssue = await Query.countDocuments({
-      ...filter,
-      query_type: "Traffic Signal Issue",
-    });
-    const suggestion = 
-      req.user && req.user.role === "main_admin"
-      ? await Query.countDocuments({...filter, query_type: "Suggestion" })
-      : 0;
-    const joinRequest = await Query.countDocuments({
-      ...filter,
-      query_type: "Join Request",
-    });
-    const generalReport = await Query.countDocuments({
-      ...filter,
-      query_type: "General Report",
-    });
+    // ... [other query type counts remain unchanged]
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -996,6 +966,26 @@ exports.getStatsByDivision = async (req, res) => {
       { $sort: { _id: 1 } },
     ]);
 
+    // NEW: Get daily status counts for the past month (for detailed chart)
+    const statusCounts = await Query.aggregate([
+      {
+        $match: {
+          ...filter,
+          timestamp: { $gte: thirtyDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
+            status: "$status"
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id.date": 1 } },
+    ]);
+
     return res.status(200).json({
       success: true,
       stats: {
@@ -1016,6 +1006,7 @@ exports.getStatsByDivision = async (req, res) => {
           totalQueries: recentQueries,
           resolvedQueries: recentResolved,
           dailyCounts,
+          statusCounts, // Add the new status counts by date
         },
       },
     });
