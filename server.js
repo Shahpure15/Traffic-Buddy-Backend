@@ -956,17 +956,36 @@ app.post('/webhook', express.urlencoded({ extended: true }), async (req, res) =>
       console.log('User session reset to language selection');
     }
     // Handle language selection state
+    // Find this code in the webhook handler
     else if (currentState === 'LANGUAGE_SELECT') {
       if (userMessage === '1') {
         // English selected
         newLanguage = 'en';
-        responseMessage = getText('NAME_REQUEST', 'en');
-        newState = 'NAME_COLLECTION';
+        // Check if user already has a name stored
+        if (userSession.user_name) {
+          // User has a name, go directly to menu
+          responseMessage = getText('NAME_CONFIRMATION', 'en', userSession.user_name) + 
+                            '\n\n' + getMainMenu('en');
+          newState = 'MENU';
+        } else {
+          // User doesn't have a name, request it
+          responseMessage = getText('NAME_REQUEST', 'en');
+          newState = 'NAME_COLLECTION';
+        }
       } else if (userMessage === '2') {
         // Marathi selected
         newLanguage = 'mr';
-        responseMessage = getText('NAME_REQUEST', 'mr');
-        newState = 'NAME_COLLECTION';
+        // Check if user already has a name stored
+        if (userSession.user_name) {
+          // User has a name, go directly to menu
+          responseMessage = getText('NAME_CONFIRMATION', 'mr', userSession.user_name) + 
+                            '\n\n' + getMainMenu('mr');
+          newState = 'MENU';
+        } else {
+          // User doesn't have a name, request it
+          responseMessage = getText('NAME_REQUEST', 'mr');
+          newState = 'NAME_COLLECTION';
+        }
       } else {
         // Invalid selection, show language prompt again
         responseMessage = getLanguagePrompt(userLanguage);

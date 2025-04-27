@@ -25,11 +25,25 @@ exports.getUserSession = async (userId) => {
     await session.save();
     console.log('New user session created with language selection prompt');
   } else if ((now - session.last_interaction) > conversationTimeout) {
-    // If it's been more than the timeout period, reset to language selection
-    session.current_state = 'LANGUAGE_SELECT';
+    // If it's been more than the timeout period, reset conversation state
+    // BUT preserve the user's name if it exists
+    const userName = session.user_name; // Save the existing user name
+    
+    // If user already has a name, skip the name collection step
+    if (userName) {
+      session.current_state = 'MENU'; // Go directly to menu
+      console.log(`Returning user ${userName} detected, skipping name collection`);
+    } else {
+      session.current_state = 'LANGUAGE_SELECT'; // Otherwise start with language
+    }
+    
+    session.last_option = null;
     session.last_interaction = now;
     await session.save();
-    console.log('Session timeout - reset to language selection');
+  } else {
+    // Regular session update
+    session.last_interaction = now;
+    await session.save();
   }
   
   return session;

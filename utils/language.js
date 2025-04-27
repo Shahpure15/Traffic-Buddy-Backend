@@ -28,6 +28,10 @@ Reply with a number 1-8.`,
 
 1-8 क्रमांकासह उत्तर द्या.`
 },
+'WELCOME_BACK': {
+  'en': 'Welcome back, {0}!',
+  'mr': 'पुन्हा स्वागत आहे, {0}!'
+},
     
     // Camera instruction translations
     // Update the CAMERA_INSTRUCTIONS to better handle the instruction message in both languages
