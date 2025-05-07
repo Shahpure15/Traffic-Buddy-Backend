@@ -31,8 +31,6 @@ router.get("/type/:type", queryController.getQueriesByType);
 // Get query by ID - This should come after more specific routes
 router.get("/:id([0-9a-fA-F]{24})", queryController.getQueryById);
 
-router.post("/:id/resolution-image", upload.single("resolution_image"), queryController.addResolutionImage);
-
 // Update query status
 router.put("/:id/status", queryController.updateQueryStatus);
 
