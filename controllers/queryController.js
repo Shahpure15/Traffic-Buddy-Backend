@@ -718,48 +718,57 @@ exports.broadcastMessageByOptions = async (req, res) => {
   }
 };
 
+// ...existing code...
+
 exports.getEmailRecords = async (req, res) => {
   try {
     const { 
       page = 1, 
-      limit = 10, 
+      limit, // Let limit be undefined by default if not passed
       startDate, 
       endDate, 
-      division 
+      division // This is the string name like "Sangavi"
     } = req.query;
 
-    const skip = (page - 1) * limit;
+    const pageNum = parseInt(page, 10) || 1;
+    let queryLimit = parseInt(limit, 10);
+
+    // If limit is not a positive number (e.g., 0, undefined, NaN from parseInt),
+    // we interpret it as fetching all records (for export).
+    // Otherwise, use it for pagination.
+    const fetchAll = !(queryLimit > 0);
     
-    // Build filter object
+    const skip = fetchAll ? 0 : (pageNum - 1) * queryLimit;
+
     let filter = {};
     
-    // Add date filtering if provided
     if (startDate && endDate) {
       filter.sentAt = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        $gte: new Date(startDate), // Assumes startDate is YYYY-MM-DD
+        $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)) // End of day for endDate
       };
     }
     
-    // Add division filtering if provided
-    if (division) {
-      filter.division = division;
+    if (division) { // If a division string is provided (e.g., "Sangavi")
+      filter.division = division; // Filter by this exact string
+    }
+    // If 'division' is empty or undefined, all divisions (matching other criteria) will be fetched.
+
+    let emailRecordsQuery = EmailRecord.find(filter).sort({ sentAt: -1 });
+
+    if (!fetchAll) {
+      emailRecordsQuery = emailRecordsQuery.skip(skip).limit(queryLimit);
     }
 
-    const emailRecords = await EmailRecord.find(filter)
-      .sort({ sentAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .exec();
-
+    const emailRecords = await emailRecordsQuery.exec();
     const totalRecords = await EmailRecord.countDocuments(filter);
 
     return res.status(200).json({
       success: true,
       count: emailRecords.length,
       total: totalRecords,
-      totalPages: Math.ceil(totalRecords / limit),
-      currentPage: parseInt(page),
+      totalPages: fetchAll ? 1 : Math.ceil(totalRecords / queryLimit),
+      currentPage: fetchAll ? 1 : pageNum,
       data: emailRecords,
     });
   } catch (error) {
