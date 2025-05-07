@@ -720,18 +720,39 @@ exports.broadcastMessageByOptions = async (req, res) => {
 
 exports.getEmailRecords = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { 
+      page = 1, 
+      limit = 10, 
+      startDate, 
+      endDate, 
+      division 
+    } = req.query;
 
     const skip = (page - 1) * limit;
+    
+    // Build filter object
+    let filter = {};
+    
+    // Add date filtering if provided
+    if (startDate && endDate) {
+      filter.sentAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+    
+    // Add division filtering if provided
+    if (division) {
+      filter.division = division;
+    }
 
-    const emailRecords = await EmailRecord.find()
+    const emailRecords = await EmailRecord.find(filter)
       .sort({ sentAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .populate("departmentName", "name code")
       .exec();
 
-    const totalRecords = await EmailRecord.countDocuments();
+    const totalRecords = await EmailRecord.countDocuments(filter);
 
     return res.status(200).json({
       success: true,
