@@ -720,39 +720,109 @@ exports.broadcastMessageByOptions = async (req, res) => {
 
 // ...existing code...
 
+// exports.getEmailRecords = async (req, res) => {
+//   try {
+//     const { 
+//       page = 1, 
+//       limit, // Let limit be undefined by default if not passed
+//       startDate, 
+//       endDate, 
+//       division // This is the string name like "Sangavi"
+//     } = req.query;
+
+//     const pageNum = parseInt(page, 10) || 1;
+//     let queryLimit = parseInt(limit, 10);
+
+//     // If limit is not a positive number (e.g., 0, undefined, NaN from parseInt),
+//     // we interpret it as fetching all records (for export).
+//     // Otherwise, use it for pagination.
+//     const fetchAll = !(queryLimit > 0);
+    
+//     const skip = fetchAll ? 0 : (pageNum - 1) * queryLimit;
+
+//     let filter = {};
+    
+//     if (startDate && endDate) {
+//       filter.sentAt = {
+//         $gte: new Date(startDate), // Assumes startDate is YYYY-MM-DD
+//         $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)) // End of day for endDate
+//       };
+//     }
+    
+//     if (division) { // If a division string is provided (e.g., "Sangavi")
+//       filter.division = division; // Filter by this exact string
+//     }
+//     // If 'division' is empty or undefined, all divisions (matching other criteria) will be fetched.
+
+//     let emailRecordsQuery = EmailRecord.find(filter).sort({ sentAt: -1 });
+
+//     if (!fetchAll) {
+//       emailRecordsQuery = emailRecordsQuery.skip(skip).limit(queryLimit);
+//     }
+
+//     const emailRecords = await emailRecordsQuery.exec();
+//     const totalRecords = await EmailRecord.countDocuments(filter);
+
+//     return res.status(200).json({
+//       success: true,
+//       count: emailRecords.length,
+//       total: totalRecords,
+//       totalPages: fetchAll ? 1 : Math.ceil(totalRecords / queryLimit),
+//       currentPage: fetchAll ? 1 : pageNum,
+//       data: emailRecords,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching email records:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 exports.getEmailRecords = async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit, // Let limit be undefined by default if not passed
-      startDate, 
-      endDate, 
-      division // This is the string name like "Sangavi"
+    const {
+      page = 1,
+      limit,
+      startDate,
+      endDate,
+      division // This is the string name like "Sangavi" from the query param
     } = req.query;
 
     const pageNum = parseInt(page, 10) || 1;
     let queryLimit = parseInt(limit, 10);
-
-    // If limit is not a positive number (e.g., 0, undefined, NaN from parseInt),
-    // we interpret it as fetching all records (for export).
-    // Otherwise, use it for pagination.
     const fetchAll = !(queryLimit > 0);
-    
     const skip = fetchAll ? 0 : (pageNum - 1) * queryLimit;
 
     let filter = {};
-    
+
     if (startDate && endDate) {
-      filter.sentAt = {
-        $gte: new Date(startDate), // Assumes startDate is YYYY-MM-DD
-        $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)) // End of day for endDate
-      };
+      try {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); // Ensure end of day
+
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+             filter.sentAt = { $gte: start, $lte: end };
+        } else {
+            console.warn("Invalid start/end date received:", startDate, endDate);
+        }
+      } catch(dateError) {
+          console.warn("Error parsing start/end date:", dateError);
+      }
     }
-    
-    if (division) { // If a division string is provided (e.g., "Sangavi")
-      filter.division = division; // Filter by this exact string
+
+    // *** START CHANGE ***
+    // Modify the division filter to be case-insensitive
+    if (division) {
+      // Use a case-insensitive regular expression that matches the exact string
+      // '^' matches the start, '$' matches the end, 'i' flag for case-insensitivity
+      filter.division = new RegExp('^' + division + '$', 'i');
+      console.log(`Applying case-insensitive division filter: ${filter.division}`);
     }
-    // If 'division' is empty or undefined, all divisions (matching other criteria) will be fetched.
+    // *** END CHANGE ***
 
     let emailRecordsQuery = EmailRecord.find(filter).sort({ sentAt: -1 });
 
