@@ -1250,3 +1250,53 @@ exports.getStatisticsByDivision = async (req, res) => {
     });
   }
 };
+
+
+// Add this function to handle resolution image uploads
+exports.addResolutionImage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image uploaded",
+      });
+    }
+    
+    const query = await Query.findById(id);
+    if (!query) {
+      return res.status(404).json({
+        success: false,
+        message: "Query not found",
+      });
+    }
+    
+    // Upload image to storage
+    try {
+      const uploadedUrl = await uploadImageToR2(req.file);
+      query.resolution_image_url = uploadedUrl;
+      await query.save();
+      
+      return res.status(200).json({
+        success: true,
+        message: "Resolution image uploaded successfully",
+        data: { resolution_image_url: uploadedUrl }
+      });
+    } catch (uploadError) {
+      console.error("Error uploading resolution image:", uploadError);
+      return res.status(500).json({
+        success: false,
+        message: "Error uploading image",
+        error: uploadError.message
+      });
+    }
+  } catch (error) {
+    console.error("Error adding resolution image:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
