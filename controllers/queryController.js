@@ -284,20 +284,20 @@ exports.updateQueryStatus = async (req, res) => {
             queryTypeForMessage.toLowerCase()
           );
         } else if (status === "Resolved") {
-          // Replace placeholders with actual values and include resolver name
+          // Replace placeholders with actual values but remove resolver name from the message
           statusMessage = getText("STATUS_RESOLVED", userLanguage)
             .replace("{0}", queryTypeForMessage.toLowerCase())
             .replace(
               "{1}",
-              `${resolution_note || "No additional details provided."} (Resolved by: ${resolver_name})`
+              resolution_note || "No additional details provided."
             );
         } else if (status === "Rejected") {
-          // Replace placeholders with actual values and include resolver name
+          // Replace placeholders with actual values but remove resolver name from the message
           statusMessage = getText("STATUS_REJECTED", userLanguage)
             .replace("{0}", queryTypeForMessage.toLowerCase())
             .replace(
               "{1}", 
-              `${resolution_note || "No reason specified."} (Rejected by: ${resolver_name})`
+              resolution_note || "No reason specified."
             );
         }
 
