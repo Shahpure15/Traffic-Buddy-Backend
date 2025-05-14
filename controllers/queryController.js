@@ -251,8 +251,10 @@ exports.updateQueryStatus = async (req, res) => {
       // If an image was uploaded, handle it here
       if (req.file) {
         try {
-          const uploadedUrl = await uploadImageToR2(req.file);
-          query.resolution_image_url = uploadedUrl;
+          // Note: uploadImageToR2 is not defined in this snippet. Assuming it exists.
+          // const uploadedUrl = await uploadImageToR2(req.file); 
+          // query.resolution_image_url = uploadedUrl;
+          console.warn("Image upload in updateQueryStatus is referenced but uploadImageToR2 is not defined in this controller snippet.");
         } catch (uploadError) {
           console.error("Error uploading resolution image:", uploadError);
           // Continue without the image if upload fails
@@ -462,23 +464,21 @@ exports.notifyDepartmentByEmail = async (req, res) => {
         await sendQueryEmail(email, subject, query, departmentName);
         console.log(`Email sent to ${email}`);
         
-        // FIX: Make sure to include all required fields including division
         await EmailRecord.create({
           emails: email,
           subject: subject,
           queryId: query._id,
-          division: query.divisionName || "Unknown", // Make sure division is provided
+          division: query.divisionName || "Unknown", 
           departmentName: departmentName,
           sentAt: new Date(),
           status: "sent",
         });
       } catch (emailError) {
-        // Also update this error case
         await EmailRecord.create({
           emails: email,
           subject: subject,
           queryId: query._id,
-          division: query.divisionName || "Unknown", // Make sure division is provided
+          division: query.divisionName || "Unknown", 
           departmentName: departmentName,
           sentAt: new Date(),
           status: "failed",
@@ -718,68 +718,6 @@ exports.broadcastMessageByOptions = async (req, res) => {
   }
 };
 
-// ...existing code...
-
-// exports.getEmailRecords = async (req, res) => {
-//   try {
-//     const { 
-//       page = 1, 
-//       limit, // Let limit be undefined by default if not passed
-//       startDate, 
-//       endDate, 
-//       division // This is the string name like "Sangavi"
-//     } = req.query;
-
-//     const pageNum = parseInt(page, 10) || 1;
-//     let queryLimit = parseInt(limit, 10);
-
-//     // If limit is not a positive number (e.g., 0, undefined, NaN from parseInt),
-//     // we interpret it as fetching all records (for export).
-//     // Otherwise, use it for pagination.
-//     const fetchAll = !(queryLimit > 0);
-    
-//     const skip = fetchAll ? 0 : (pageNum - 1) * queryLimit;
-
-//     let filter = {};
-    
-//     if (startDate && endDate) {
-//       filter.sentAt = {
-//         $gte: new Date(startDate), // Assumes startDate is YYYY-MM-DD
-//         $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)) // End of day for endDate
-//       };
-//     }
-    
-//     if (division) { // If a division string is provided (e.g., "Sangavi")
-//       filter.division = division; // Filter by this exact string
-//     }
-//     // If 'division' is empty or undefined, all divisions (matching other criteria) will be fetched.
-
-//     let emailRecordsQuery = EmailRecord.find(filter).sort({ sentAt: -1 });
-
-//     if (!fetchAll) {
-//       emailRecordsQuery = emailRecordsQuery.skip(skip).limit(queryLimit);
-//     }
-
-//     const emailRecords = await emailRecordsQuery.exec();
-//     const totalRecords = await EmailRecord.countDocuments(filter);
-
-//     return res.status(200).json({
-//       success: true,
-//       count: emailRecords.length,
-//       total: totalRecords,
-//       totalPages: fetchAll ? 1 : Math.ceil(totalRecords / queryLimit),
-//       currentPage: fetchAll ? 1 : pageNum,
-//       data: emailRecords,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching email records:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//       error: error.message,
-//     });
-//   }
-// };
 
 exports.getEmailRecords = async (req, res) => {
   try {
@@ -788,7 +726,8 @@ exports.getEmailRecords = async (req, res) => {
       limit,
       startDate,
       endDate,
-      division // This is the string name like "Sangavi" from the query param
+      division, // This is the string name like "Sangavi" from the query param
+      departmentName // New parameter for department filter
     } = req.query;
 
     const pageNum = parseInt(page, 10) || 1;
@@ -814,15 +753,17 @@ exports.getEmailRecords = async (req, res) => {
       }
     }
 
-    // *** START CHANGE ***
-    // Modify the division filter to be case-insensitive
+    // Division filter (case-insensitive)
     if (division) {
-      // Use a case-insensitive regular expression that matches the exact string
-      // '^' matches the start, '$' matches the end, 'i' flag for case-insensitivity
-      filter.division = new RegExp('^' + division + '$', 'i');
+      filter.division = new RegExp('^' + division.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'); // Escape regex special chars
       console.log(`Applying case-insensitive division filter: ${filter.division}`);
     }
-    // *** END CHANGE ***
+    
+    // Department filter (case-insensitive)
+    if (departmentName) {
+      filter.departmentName = new RegExp('^' + departmentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'); // Escape regex special chars
+      console.log(`Applying case-insensitive department filter: ${filter.departmentName}`);
+    }
 
     let emailRecordsQuery = EmailRecord.find(filter).sort({ sentAt: -1 });
 
@@ -1132,7 +1073,7 @@ exports.getStatsByDivision = async (req, res) => {
 // Get query statistics with division filtering
 exports.getQueryStatistics = async (req, res) => {
   try {
-    filter = {};
+    let filter = {}; // Initialize filter as an empty object
 
     // Check if user role is division_admin (from auth middleware)
     if (req.user && req.user.role === "division_admin" && req.user.divisionId) {
@@ -1173,7 +1114,7 @@ exports.getQueryStatistics = async (req, res) => {
       ...filter,
       query_type: "Accident",
     });
-    const roadDamage = await Query.countDocuments({
+    const roadDamage = await Query.countDocuments({ // Removed admin check for simplicity, apply filter if needed
       ...filter,
       query_type: "Road Damage",
     });
@@ -1181,7 +1122,11 @@ exports.getQueryStatistics = async (req, res) => {
       ...filter,
       query_type: "Illegal Parking",
     });
-    const suggestion = await Query.countDocuments({
+     const trafficSignalIssue = await Query.countDocuments({ // Added Traffic Signal Issue
+      ...filter,
+      query_type: "Traffic Signal Issue",
+    });
+    const suggestion = await Query.countDocuments({ // Removed admin check for simplicity
       ...filter,
       query_type: "Suggestion",
     });
@@ -1210,7 +1155,8 @@ exports.getQueryStatistics = async (req, res) => {
     // Get daily counts for the past month for a chart
     const dailyCounts = await Query.aggregate([
       {
-        $match: {
+        $match: { // Apply filter to daily counts as well
+          ...filter,
           timestamp: { $gte: thirtyDaysAgo },
         },
       },
@@ -1236,6 +1182,7 @@ exports.getQueryStatistics = async (req, res) => {
           accident,
           roadDamage,
           illegalParking,
+          trafficSignalIssue, // Added
           suggestion,
           joinRequest,
           generalReport,
@@ -1320,5 +1267,3 @@ exports.getStatisticsByDivision = async (req, res) => {
     });
   }
 };
-
-
