@@ -144,7 +144,7 @@ exports.submitApplication = async (req, res) => {
 // Get all applications with pagination and filtering
 exports.getAllApplications = async (req, res) => {
   try {
-      let { page = 1, limit = 10, status, division, month, year } = req.query;
+      let { page = 1, limit = 10, status, division, month, year, search } = req.query;
 
       // Convert page and limit to numbers, handle potential non-numeric values
       page = parseInt(page, 10);
@@ -188,6 +188,19 @@ exports.getAllApplications = async (req, res) => {
           }
       }
 
+      // Add search filter (case-insensitive, matches name, email, phone, etc.)
+      if (search && search.trim() !== "") {
+          const searchRegex = new RegExp(search.trim(), "i");
+          filter.$or = [
+              { full_name: searchRegex },
+              { user_name: searchRegex },
+              { email: searchRegex },
+              { phone: searchRegex },
+              { motivation: searchRegex },
+              { aadhar_number: searchRegex },
+              { division: searchRegex }
+          ];
+      }
 
       const query = TeamApplication.find(filter).sort({ applied_at: -1 });
 
