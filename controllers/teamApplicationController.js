@@ -165,15 +165,8 @@ exports.getAllApplications = async (req, res) => {
           }
       }
       if (division) {
-          // Assuming division is passed as code, find its ID
-          const divisionDoc = await Division.findOne({ code: division });
-          if (divisionDoc) {
-              filter.division = divisionDoc._id; // Filter by ObjectId if found
-          } else {
-              // Handle case where division code is invalid? Maybe return empty or ignore filter.
-              // For now, we'll effectively ignore the filter if the code is bad.
-              console.warn(`Invalid division code provided for filtering: ${division}`);
-          }
+      filter.division = new RegExp('^' + division.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'); // Escape regex special chars
+      console.log(`Applying case-insensitive division filter: ${filter.division}`);
       }
 
       // Add month and year filtering based on 'applied_at'
