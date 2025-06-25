@@ -66,7 +66,19 @@ const teamApplicationSchema = new mongoose.Schema({
     verification_notes: String,
     processed_at: Date,
     verified_by: String,
-    note: String
+    note: String,
+    profession: {
+        type: String,
+        required: true
+    },
+    has_court_case: {
+        type: Boolean,
+        default: false
+    },
+    court_case_description: {
+        type: String,
+        default: ''
+    }
 }, { timestamps: true });
 
 // Add indexes for better query performance

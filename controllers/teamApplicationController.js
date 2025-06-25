@@ -65,14 +65,26 @@ exports.submitApplication = async (req, res) => {
       address,
       phone,
       email,
-      aadharNumber
+      aadharNumber,
+      profession,
+      hasCourtCase,
+      courtCaseDescription
     } = req.body;
     
     // Validate required fields
-    if (!userId || !sessionId || !fullName || !division || !motivation || !address || !phone || !email || !aadharNumber) {
+    if (!userId || !sessionId || !fullName || !division || !motivation || !address || !phone || !email || !aadharNumber || !profession) {
       return res.status(400).json({
         success: false,
-        error: 'All fields are required'
+        error: 'All required fields must be filled'
+      });
+    }
+    
+    // Validate that name contains only letters (allowing spaces, dots, and basic characters)
+    const nameRegex = /^[A-Za-z\s.'()-]+$/;
+    if (!nameRegex.test(fullName)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name should only contain letters and basic characters'
       });
     }
     
@@ -102,6 +114,15 @@ exports.submitApplication = async (req, res) => {
       });
     }
     
+    // Validate court case description if hasCourtCase is true
+    const hasCourt = hasCourtCase === 'true' || hasCourtCase === true;
+    if (hasCourt && !courtCaseDescription) {
+      return res.status(400).json({
+        success: false,
+        error: 'Court case description is required when "Has court case" is selected'
+      });
+    }
+    
     // Create new application
     const application = new TeamApplication({
       user_id: userId,
@@ -114,6 +135,9 @@ exports.submitApplication = async (req, res) => {
       email,
       aadhar_number: aadharNumber,
       aadhar_document_url: aadharDocumentUrl,
+      profession: profession,
+      has_court_case: hasCourt,
+      court_case_description: hasCourt ? courtCaseDescription : '',
       status: 'Pending',
       session_id: sessionId,
       session_expires: sessionExpires
@@ -144,7 +168,7 @@ exports.submitApplication = async (req, res) => {
 // Get all applications with pagination and filtering
 exports.getAllApplications = async (req, res) => {
   try {
-      let { page = 1, limit = 10, status, division, month, year, search } = req.query;
+      let { page = 1, limit = 10, status, division, month, year, search, hasCourtCase } = req.query;
 
       // Convert page and limit to numbers, handle potential non-numeric values
       page = parseInt(page, 10);
@@ -164,9 +188,15 @@ exports.getAllApplications = async (req, res) => {
               filter.status = normalizedStatus;
           }
       }
+      
       if (division) {
-      filter.division = new RegExp('^' + division.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'); // Escape regex special chars
-      console.log(`Applying case-insensitive division filter: ${filter.division}`);
+        filter.division = new RegExp('^' + division.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'); // Escape regex special chars
+        console.log(`Applying case-insensitive division filter: ${filter.division}`);
+      }
+      
+      // Add filter for court case if specified
+      if (hasCourtCase !== undefined) {
+        filter.has_court_case = hasCourtCase === 'true';
       }
 
       // Add month and year filtering based on 'applied_at'
