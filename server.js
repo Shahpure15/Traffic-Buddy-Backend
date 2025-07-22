@@ -1376,12 +1376,13 @@ app.post('/api/join-team', upload.single('aadharDocument'), async (req, res) => 
       email,
       aadharNumber,
       profession,
+      dateOfBirth,
       hasCourtCase,
       courtCaseDescription
     } = req.body;
     
     // Validate required fields
-    if (!userId || !sessionId || !fullName || !division || !motivation || !address || !phone || !email || !aadharNumber || !profession) {
+    if (!userId || !sessionId || !fullName || !division || !motivation || !address || !phone || !email || !aadharNumber || !profession || !dateOfBirth) {
       return res.status(400).json({
         success: false,
         error: 'All required fields must be filled'
@@ -1394,6 +1395,26 @@ app.post('/api/join-team', upload.single('aadharDocument'), async (req, res) => 
       return res.status(400).json({
         success: false,
         error: 'Name should only contain letters and basic characters'
+      });
+    }
+    
+    // Validate date of birth
+    const birthDate = new Date(dateOfBirth);
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (birthDate > today) {
+      return res.status(400).json({
+        success: false,
+        error: 'Date of birth cannot be in the future'
+      });
+    }
+    
+    if (age < 18 || (age === 18 && monthDiff < 0) || (age === 18 && monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      return res.status(400).json({
+        success: false,
+        error: 'Applicant must be at least 18 years old'
       });
     }
     
@@ -1445,6 +1466,7 @@ app.post('/api/join-team', upload.single('aadharDocument'), async (req, res) => 
       aadhar_number: aadharNumber,
       aadhar_document_url: aadharDocumentUrl,
       profession: profession,
+      date_of_birth: new Date(dateOfBirth),
       has_court_case: hasCourt,
       court_case_description: hasCourt ? courtCaseDescription : '',
       status: 'Pending',
