@@ -71,6 +71,10 @@ const teamApplicationSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    date_of_birth: {
+        type: Date,
+        required: false // Set to false initially for backward compatibility
+    },
     has_court_case: {
         type: Boolean,
         default: false
