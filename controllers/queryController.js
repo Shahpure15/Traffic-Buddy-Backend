@@ -61,13 +61,20 @@ exports.getAllQueries = async (req, res) => {
       }
     }
 
-    // Search functionality
+    // Search functionality - searches across multiple fields:
+    // - description: Query description/content
+    // - user_name: Name of the person who reported
+    // - vehicle_number: Vehicle number if applicable
+    // - location.address: Location address
+    // - resolution_note: Response/resolution given to the query
     if (search) {
       filter.$or = [
         { description: { $regex: search, $options: "i" } },
         { user_name: { $regex: search, $options: "i" } },
         { vehicle_number: { $regex: search, $options: "i" } },
         { "location.address": { $regex: search, $options: "i" } },
+        { resolution_note: { $regex: search, $options: "i" } },
+
       ];
     }
 
